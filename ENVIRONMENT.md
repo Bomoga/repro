@@ -1,156 +1,80 @@
-# Environment Setup for Repro
+# Environment
 
-## Prerequisites
+What a machine needs to build and run Repro, and every environment variable the code reads. `CLAUDE.md` sections 2, 9, and 10 are the source for the rules here.
 
-The following software must be installed before building and running Repro:
+## Tools
 
-### Core Requirements
+| Tool | Needed by | Install |
+|---|---|---|
+| Node.js 18+ and npm | Everyone | nodejs.org, or your version manager |
+| Git 2.23+ | Everyone | Git's site or your package manager; GitHub SSH or HTTPS credentials already working |
+| Claude Code | Everyone (build tool only, not part of the product) | `npm install -g @anthropic-ai/claude-code`, or `curl -fsSL https://claude.ai/install.sh \| bash`; then `claude doctor` |
+| claude.ai Pro or Max account | Everyone | Required for Routines and Dispatch; a Console API key alone won't reach them |
+| Docker Desktop, or Docker Engine on Linux | Lanes 2 and 3, demo host | Every target-repo command runs in its container (section 9) |
+| Semgrep | Lane 2, demo host | `brew install semgrep` or `python3 -m pip install semgrep` |
+| gitleaks | Lane 2, demo host | `brew install gitleaks`, or a release binary from the gitleaks GitHub repo |
+| GitHub CLI (`gh`) | Optional | Speeds up opening and checking PRs |
+| WSL2 | Windows only | Run Claude Code inside WSL, not PowerShell or cmd |
 
-- **Node.js 18+** - Required for npm install, MCP servers, and hooks via npx
-  - Install from https://nodejs.org/
-  - Verify: `node --version`
+## Environment variables
 
-- **Claude Code** - The build tool for Repro
-  - Install: `npm install -g @anthropic-ai/claude-code`
-  - Or native binary: `curl -fsSL https://claude.ai/install.sh | bash` (macOS/Linux/WSL)
-  - Verify: `claude doctor`
+Secrets are marked. Defaults come from the code as of 2026-09-26; where the code and this table disagree, the code wins, so fix the table.
 
-- **Git 2.23+** - For cloning, branching, and PR-based workflows
-  - Verify: `git --version`
+### Secrets
 
-### Development Account Requirements
+| Variable | Read by | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | `@repro/agents` Gemini wrapper (Lane 3); Lane 4's PR narrator goes through the same wrapper | Required for any real model call; unit tests mock the wrapper and don't need it. One key per developer, from Google AI Studio. The demo host uses a key on a billing-linked project. |
+| `MONGODB_URI` | The API's Run Store (Lane 4) | Connection string for the one shared Atlas cluster Lane 1 provisions and hands out. Nobody runs a local database. |
 
-- **claude.ai account (Pro or Max tier)** - Required for Claude Code authentication
-  - Authenticates Claude Code and enables Routines/Dispatch
-  - Console API key alone is insufficient for these features
+A target-repo GitHub credential for opening repair PRs has no variable name yet. Whatever it becomes: scoped to the minimum, used only at the PR-opening step, never passed to a model.
 
-- **Gemini API key** - For model-based reasoning in Diagnose, Repair, and Challenger stages
-  - Create in Google AI Studio: https://aistudio.google.com/
-  - Export as environment variable: `export GEMINI_API_KEY=<your-key>`
-  - For the demo host: use a billing-linked project key
-  - For development: free-tier keys are fine (check Google's terms for your use case)
+### Model routing (Lane 3)
 
-### Optional but Recommended
+| Variable | Default | Notes |
+|---|---|---|
+| `REPRO_MODEL_DIAGNOSE` | `gemini-3.1-pro-preview` | Point both Pro roles at `gemini-3.8-flash` if Pro quota is tight; free-tier keys get no Pro requests |
+| `REPRO_MODEL_CHALLENGER` | `gemini-3.1-pro-preview` | |
+| `REPRO_MODEL_REPAIR` | `gemini-3.8-flash` | |
+| `REPRO_MODEL_NARRATOR` | `gemini-3.8-flash` | |
+| `REPRO_GEMINI_TRANSPORT` | `request` | `background` polls instead of holding one request open; costs extra requests, so use it only on billing-linked keys |
 
-- **GitHub CLI (`gh`)** - For efficient PR/issue management from the terminal
-  - Install from https://cli.github.com/
-  - Set up SSH or HTTPS credentials for GitHub
+Lane 3's integration tests (`npm run test:integration` in `packages/agents`) load `GEMINI_API_KEY` from a `.env` at the repo root, and default both Pro roles to Flash unless the variables are already set.
 
-- **Semgrep** - Static analysis scanner (wrapped by Lane 2)
-  - Install: `npm install -g semgrep`
-  - Or: `brew install semgrep` (macOS)
+### Sandbox and ingestion (Lane 2)
 
-- **gitleaks** - Secret detection scanner (wrapped by Lane 2)
-  - Install: https://github.com/gitleaks/gitleaks#installing
-  - Or: `brew install gitleaks` (macOS)
+| Variable | Default | Notes |
+|---|---|---|
+| `REPRO_SANDBOX_IMAGE` | `repro-sandbox:dev` | Built from `sandbox/Dockerfile` |
+| `REPRO_SANDBOX_MEMORY` | `3g` | Container memory limit |
+| `REPRO_SANDBOX_CPUS` | `2` | Container CPU limit |
+| `REPRO_WORKSPACES_DIR` | `~/.repro/workspaces` | Kept under `$HOME` because Docker Desktop and Colima on macOS only share the home directory with the VM |
+| `REPRO_NETWORK_TESTS` | unset | Set to `1` to run the ingest tests that clone from github.com |
 
-- **Docker Desktop** (or Docker Engine on Linux) - For sandboxed code execution
-  - Required for safety (section 9 of CLAUDE.md)
-  - Install from https://www.docker.com/
+### Status surface (Lane 4)
 
-- **WSL2** (Windows only) - Run Claude Code inside WSL rather than PowerShell/cmd
-  - Install from Microsoft Store or `wsl --install`
+| Variable | Default | Notes |
+|---|---|---|
+| `PORT` | `4000` | API server port |
+| `HOST` | `0.0.0.0` | API server bind address |
+| `REPRO_API_URL` | `http://localhost:4000` | Where the CLI and the dashboard reach the API |
 
-## Environment Variables
+## Rules for secrets
 
-### For All Developers
+- Environment variables only: never in the repo, a prompt, a log, or a commit. A `.env` at the repo root is git-ignored for local use.
+- Routines never hold `GEMINI_API_KEY`; anything a routine runs uses the mocked wrapper.
+- On unpaid usage, Google may use submitted content to improve its products. Seeded demo repos are fine on a free key; real target repos go through the billing-linked one.
+- gitleaks runs with `--redact`, so a real secret's value never reaches a Finding, the Run Store, the dashboard, or a model.
 
-```bash
-# Git configuration (done once)
-git config user.name "Your Name"
-git config user.email "your.email@example.com"
+## First-time setup
 
-# Gemini API (required for running the product)
-export GEMINI_API_KEY=<your-gemini-api-key>
-
-# MongoDB Atlas (set by Lane 1, used by all)
-export MONGODB_URI=<shared-connection-string>
+```sh
+git clone git@github.com:Bomoga/repro.git
+cd repro
+git checkout lane-N        # your lane, per section 11
+npm install
+npm run build              # type-check
+npm test
 ```
 
-### For Dispatch and Routines (Remote Supervision)
-
-1. Authenticate Claude Code:
-   ```bash
-   claude login
-   ```
-
-2. Pair Dispatch:
-   - Open Cowork on your desktop
-   - Enable Dispatch mode
-   - Scan the QR code with your phone
-
-### Optional: Model Overrides
-
-These env vars override the defaults specified in CLAUDE.md section 10:
-
-```bash
-# Override specific model IDs (defaults below)
-export REPRO_MODEL_DIAGNOSE=gemini-3.1-pro-preview
-export REPRO_MODEL_CHALLENGER=gemini-3.1-pro-preview
-export REPRO_MODEL_REPAIR=gemini-3.8-flash
-export REPRO_MODEL_NARRATOR=gemini-3.8-flash
-```
-
-## Initial Setup (First Time)
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-org/repro.git
-   cd repro
-   ```
-
-2. **Verify Claude Code:**
-   ```bash
-   claude doctor
-   ```
-
-3. **Install Node dependencies** (once monorepo is set up):
-   ```bash
-   npm install
-   ```
-
-4. **Set environment variables:**
-   ```bash
-   export GEMINI_API_KEY=<your-key>
-   export MONGODB_URI=<shared-connection-string>
-   ```
-
-5. **Authenticate for Dispatch** (if you'll be using remote supervision):
-   ```bash
-   claude login
-   # Then pair Dispatch in Cowork
-   ```
-
-## Per-Session Setup
-
-Each time you start work on Repro:
-
-```bash
-# Activate your lane branch
-git checkout lane-1  # (or your assigned lane)
-
-# Ensure environment variables are set
-export GEMINI_API_KEY=<your-key>
-export MONGODB_URI=<shared-connection-string>
-
-# Keep desktop app awake if using Dispatch
-# (see section 6 of CLAUDE.md for details)
-```
-
-## Troubleshooting
-
-- **Claude Code auth fails:** Run `claude login` and ensure you're using a Pro/Max claude.ai account, not a Console API key
-- **Gemini API 401:** Check that `GEMINI_API_KEY` is set and valid
-- **MongoDB connection fails:** Confirm `MONGODB_URI` is correct and your IP is whitelisted in Atlas
-- **Docker not found:** Ensure Docker Desktop is running and `docker ps` works
-- **Semgrep/gitleaks not found:** Install globally or via `npm` before running detectors
-
-## Rate Limits and Quotas
-
-- **Gemini free tier:** ~60 requests/minute across all models
-  - For demo: use a billing-linked key (Tier 1: much higher)
-  - For development: share one free key per person or rotate keys
-- **MongoDB Atlas free tier:** 512 MB storage, plenty for a hackathon
-- **Claude Code usage:** Charged per token to your claude.ai subscription account (not Console)
-
-See section 10 of CLAUDE.md for budgeting details.
+Then export `GEMINI_API_KEY` (Lanes 3 and 4) and `MONGODB_URI` (from Lane 1), authenticate Claude Code with your claude.ai account, and pair Dispatch: open Cowork on desktop, turn on Dispatch, scan its QR code from the Claude mobile app. Dispatch only reaches your desktop while it's awake with the app open.
