@@ -1,0 +1,3 @@
+# Everything under sandbox/ is baked into a Linux image. Keep LF on every checkout, Windows
+# included: a CRLF shebang ("python3\r") makes every reproduction command exit 127.
+sandbox/** text eol=lf

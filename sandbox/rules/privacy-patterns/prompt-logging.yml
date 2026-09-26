@@ -1,0 +1,56 @@
+# privacy-patterns (Assurant, CLAUDE.md section 8). Note: semgrep metavariable-regex is anchored at
+# the start of the bound text, so "contains" checks are written as ".*(...)".
+rules:
+  - id: privacy.prompt-logging.js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Prompt or conversation content ($ARG) is written to a log without redaction. Logs are
+      usually retained and shared far more widely than the conversation itself.
+    metadata:
+      category: privacy
+      privacy-check: prompt-logging
+      cwe: ["CWE-532: Insertion of Sensitive Information into Log File"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: console.$LOG(..., $ARG, ...)
+          - patterns:
+              - pattern: $LOGGER.$LOG(..., $ARG, ...)
+              - metavariable-regex:
+                  metavariable: $LOGGER
+                  regex: (?i)(.*\.)?(logger|log|winston|pino|bunyan)$
+      - metavariable-regex:
+          metavariable: $LOG
+          regex: ^(log|info|debug|warn|error|trace)$
+      # Not a bare string label, not already passed through a redaction helper, and mentions
+      # prompt/conversation content.
+      - metavariable-regex:
+          metavariable: $ARG
+          regex: (?is)^(?!["'])(?!.*(redact|mask|scrub|sanitiz|hash)).*(prompt|completion|messages|conversation|chat_?history|user_?input|user_?message)
+
+  - id: privacy.prompt-logging.py
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Prompt or conversation content ($ARG) is written to a log without redaction. Logs are
+      usually retained and shared far more widely than the conversation itself.
+    metadata:
+      category: privacy
+      privacy-check: prompt-logging
+      cwe: ["CWE-532: Insertion of Sensitive Information into Log File"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: $LOGGER.$LOG(..., $ARG, ...)
+              - metavariable-regex:
+                  metavariable: $LOGGER
+                  regex: (?i)(.*\.)?_?(logger|log|logging)$
+              - metavariable-regex:
+                  metavariable: $LOG
+                  regex: ^(debug|info|warning|warn|error|exception|critical|log)$
+          - pattern: print(..., $ARG, ...)
+      - metavariable-regex:
+          metavariable: $ARG
+          regex: (?is)^(?!["'])(?!.*(redact|mask|scrub|sanitiz|hash)).*(prompt|completion|messages|conversation|chat_?history|user_?input|user_?message)
