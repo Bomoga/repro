@@ -1,4 +1,4 @@
-import type { Run } from "@repro/contracts";
+import type { Run, RunReport } from "@repro/contracts";
 import { apiErrorCode, describeError, isUnreachable, type ApiClient } from "./client.ts";
 import { formatDuration, painter, renderCompletion, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
 import { resolveScanTarget } from "./targets.ts";
@@ -136,6 +136,65 @@ export async function decideCommand(ctx: CommandContext, patchId: string, decisi
   const patch = await ctx.client.patches.decide.mutate({ patchId, decision });
   ctx.out(`${patch.id} is now ${patch.status}`);
   return 0;
+}
+
+export interface ReportOptions {
+  runId?: string;
+  all?: boolean;
+  json?: boolean;
+}
+
+export async function reportCommand(ctx: CommandContext, options: ReportOptions): Promise<number> {
+  const paint = paintOf(ctx);
+  try {
+    if (options.all) {
+      const runs = await ctx.client.runs.list.query({});
+      ctx.out(paint.dim(`# Reports for ${runs.length} run(s)\n`));
+      for (const run of runs) {
+        const report = await ctx.client.report.query({ runId: run.id });
+        if (options.json) {
+          printJson(ctx, report);
+        } else {
+          ctx.out(paint.bold(`Run: ${run.id}`));
+          ctx.out(`  Findings: ${report.stats.rawFindings} (${report.stats.reproducedFindings} reproduced, ${report.stats.noiseCut} noise)`);
+          ctx.out(`  Patches: ${report.stats.patchesAttempted} attempted, ${report.stats.patchesVerified} verified, ${report.stats.patchesMerged} merged`);
+          ctx.out(`  Success: ${(report.stats.successRate * 100).toFixed(1)}%`);
+          ctx.out(`  Cost per fix: $${report.stats.estimatedCostPerFix.toFixed(3)}`);
+          ctx.out("");
+        }
+      }
+    } else if (options.runId) {
+      const report = await ctx.client.report.query({ runId: options.runId });
+      if (options.json) {
+        printJson(ctx, report);
+      } else {
+        ctx.out(paint.bold(`Report: ${options.runId}`));
+        ctx.out(`Generated: ${report.generatedAt}`);
+        ctx.out("");
+        ctx.out(paint.bold("Stats:"));
+        ctx.out(`  Raw findings: ${report.stats.rawFindings}`);
+        ctx.out(`  Reproduced: ${report.stats.reproducedFindings}`);
+        ctx.out(`  Noise cut: ${report.stats.noiseCut}`);
+        ctx.out(`  Into repair: ${report.stats.findingsIntoRepair}`);
+        ctx.out(`  Patches verified: ${report.stats.patchesVerified}/${report.stats.patchesAttempted}`);
+        ctx.out(`  Success rate: ${(report.stats.successRate * 100).toFixed(1)}%`);
+        ctx.out(`  Regressions: ${report.stats.regressionsFound}`);
+        ctx.out(`  Disputes: ${report.stats.challengerDisputes}`);
+        ctx.out(`  Cost per fix: $${report.stats.estimatedCostPerFix.toFixed(3)}`);
+        ctx.out(`  Duration: ${formatDuration(report.stats.totalDurationMs)}`);
+      }
+    } else {
+      ctx.err("error: provide --all or --runId <id>");
+      return 1;
+    }
+    return 0;
+  } catch (error) {
+    if ((error as any)?.code === "NOT_FOUND") {
+      ctx.err(`error: run not found`);
+      return 1;
+    }
+    throw error;
+  }
 }
 
 /** Runs a command, turning any error into one readable line on stderr and exit code 1. */
