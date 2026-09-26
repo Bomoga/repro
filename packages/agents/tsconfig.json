@@ -1,19 +1,8 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2023",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "lib": ["es2023"],
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "declaration": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "noImplicitOverride": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src", "test", "vitest.config.ts", "vitest.integration.config.ts"],
+  "exclude": ["test/fixtures/demo-target"]
 }
