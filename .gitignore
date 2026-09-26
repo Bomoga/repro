@@ -3,3 +3,4 @@ repro-developer-guide.md
 node_modules/
 dist/
 *.log
+.env

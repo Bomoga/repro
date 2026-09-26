@@ -1,0 +1,20 @@
+{
+  "name": "@repro/store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsx src/check.ts"
+  },
+  "dependencies": {
+    "@repro/contracts": "*",
+    "mongoose": "^8.24.4"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "tsx": "^4.23.15"
+  }
+}
