@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
@@ -19,5 +19,10 @@
     "@google/genai": "^2.24.0",
     "@repro/contracts": "*",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@repro/detect": "*",
+    "@repro/executor": "*",
+    "@repro/ingest": "*"
   }
 }
