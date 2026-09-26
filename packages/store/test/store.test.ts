@@ -143,6 +143,14 @@ describe("runs", () => {
     expect(await store.runs.claimNextQueued()).toBeNull();
   });
 
+  it("claims one specific queued run exactly once", async () => {
+    await newRun({ id: "mine" });
+    const [a, b] = await Promise.all([store.runs.claim("mine"), store.runs.claim("mine")]);
+    expect([a, b].filter((run) => run !== null)).toEqual([expect.objectContaining({ id: "mine", status: "running" })]);
+    expect(await store.runs.claim("mine")).toBeNull();
+    expect(await store.runs.claim("missing")).toBeNull();
+  });
+
   it("completes at done, fails in place, and never changes once finished", async () => {
     await newRun({ id: "ok" });
     await store.runs.setStage("ok", "verify");
@@ -277,11 +285,19 @@ describe("patches", () => {
     const run = await seeded();
     const regressed = patch("p1", "d1", {
       testsPassed: false,
-      regressionFindings: [finding("r1", { reproductionCommand: undefined })],
+      reproductionOutputAfter: "src/db.js:10 still matches",
+      regressionFindings: [finding("r1", { reproducible: true, reproductionOutput: "1 result" })],
       challengerNotes: "counter-test fails before and after",
       status: "rejected",
     });
     expect(await store.patches.insert(run.id, regressed)).toEqual(regressed);
+  });
+
+  it("keeps a finding's reproduction output", async () => {
+    const run = await newRun();
+    const confirmed = finding("f1", { reproducible: true, reproductionOutput: "src/db.js:10: rule matched" });
+    await store.findings.insert(run.id, [confirmed]);
+    expect(await store.findings.get("f1")).toEqual(confirmed);
   });
 
   it("moves proposed -> verified -> merged, and refuses everything else", async () => {
@@ -322,6 +338,27 @@ describe("patches", () => {
       failedChecks: ["the original finding still reproduces", "the Challenger disputed the patch"],
     });
     expect((await store.patches.transition("p1", "rejected")).status).toBe("rejected");
+  });
+
+  it("records Verify's results on a proposed patch without touching its status", async () => {
+    const run = await seeded();
+    await store.patches.insert(run.id, patch("p1", "d1", { challengerVerdict: "disputed", reproductionOutputAfter: "0 results" }));
+    const recorded = await store.patches.recordVerification("p1", {
+      challengerVerdict: "confirmed",
+      challengerNotes: "counter-test fails before, passes after",
+      reproductionOutputAfter: undefined,
+    });
+    expect(recorded).toMatchObject({
+      status: "proposed",
+      challengerVerdict: "confirmed",
+      challengerNotes: "counter-test fails before, passes after",
+      reproductionOutputAfter: "0 results",
+      testsPassed: true,
+    });
+    expect((await store.patches.transition("p1", "verified")).status).toBe("verified");
+    await expect(store.patches.recordVerification("p1", { challengerVerdict: "disputed" })).rejects.toThrow(/only a proposed patch/);
+    await expect(store.patches.recordVerification("ghost", { challengerVerdict: "confirmed" })).rejects.toThrow(/not found/);
+    await expect(store.patches.recordVerification("p1", { challengerVerdict: "maybe" as never })).rejects.toThrow();
   });
 
   it("lets exactly one of a racing merge and reject win", async () => {

@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@repro/contracts": "*",
-    "mongoose": "^8.24.4"
+    "mongoose": "^8.24.4",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0",

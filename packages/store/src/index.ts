@@ -35,6 +35,7 @@ export {
   patchQueries,
   type ListPatchesQuery,
   type PatchQueries,
+  type PatchVerification,
 } from "./queries/patches.js";
 export {
   ACTIVE_RUN_STATUSES,
