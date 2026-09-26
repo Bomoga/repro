@@ -149,13 +149,13 @@ export async function reportCommand(ctx: CommandContext, options: ReportOptions)
   try {
     if (options.all) {
       const runs = await ctx.client.runs.list.query({});
-      ctx.out(paint.dim(`# Reports for ${runs.length} run(s)\n`));
+      ctx.out(paint("dim", `# Reports for ${runs.length} run(s)\n`));
       for (const run of runs) {
         const report = await ctx.client.report.query({ runId: run.id });
         if (options.json) {
           printJson(ctx, report);
         } else {
-          ctx.out(paint.bold(`Run: ${run.id}`));
+          ctx.out(paint("bold", `Run: ${run.id}`));
           ctx.out(`  Findings: ${report.stats.rawFindings} (${report.stats.reproducedFindings} reproduced, ${report.stats.noiseCut} noise)`);
           ctx.out(`  Patches: ${report.stats.patchesAttempted} attempted, ${report.stats.patchesVerified} verified, ${report.stats.patchesMerged} merged`);
           ctx.out(`  Success: ${(report.stats.successRate * 100).toFixed(1)}%`);
@@ -168,10 +168,10 @@ export async function reportCommand(ctx: CommandContext, options: ReportOptions)
       if (options.json) {
         printJson(ctx, report);
       } else {
-        ctx.out(paint.bold(`Report: ${options.runId}`));
+        ctx.out(paint("bold", `Report: ${options.runId}`));
         ctx.out(`Generated: ${report.generatedAt}`);
         ctx.out("");
-        ctx.out(paint.bold("Stats:"));
+        ctx.out(paint("bold", "Stats:"));
         ctx.out(`  Raw findings: ${report.stats.rawFindings}`);
         ctx.out(`  Reproduced: ${report.stats.reproducedFindings}`);
         ctx.out(`  Noise cut: ${report.stats.noiseCut}`);

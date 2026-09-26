@@ -1,19 +1,19 @@
 import type { Run, RunReport, Finding } from "@repro/contracts";
-import type { Store } from "@repro/store";
+import type { RunStore } from "./store/types.ts";
 
 /**
  * Build a complete analytics report for a run.
- * Every stat is deterministic from the Run Store and events—no model output in numbers.
+ * Every stat is deterministic from the Run Store—no model output in numbers.
  * Findings include their journey from detection through merge.
  */
-export async function buildReport(store: Store, runId: string): Promise<RunReport> {
-  const run = await store.runs.get(runId);
+export async function buildReport(store: RunStore, runId: string): Promise<RunReport> {
+  const run = await store.getRun(runId);
   if (!run) throw new Error(`Run ${runId} not found`);
 
-  const findings = await store.findings.list(runId);
-  const diagnoses = await store.diagnoses.list(runId);
-  const patches = await store.patches.list(runId);
-  const events = await store.logs.list(runId);
+  const findings = await store.listFindings(runId);
+  const diagnoses = await store.listDiagnoses(runId);
+  const patches = await store.listPatches(runId);
+  const logs = await store.listLogs(runId);
 
   const reproducedFindings = findings.filter((f) => f.reproducible).length;
   const patchesVerified = patches.filter((p) => p.status === "verified").length;
@@ -21,21 +21,25 @@ export async function buildReport(store: Store, runId: string): Promise<RunRepor
   const challengerDisputes = patches.filter((p) => p.challengerVerdict === "disputed").length;
   const regressionFindings = patches.reduce((sum, p) => sum + p.regressionFindings.length, 0);
 
-  // Time per stage: compute from events
-  const eventsByKind: Record<string, any[]> = {};
-  for (const evt of events) {
-    if (!eventsByKind[evt.kind]) eventsByKind[evt.kind] = [];
-    eventsByKind[evt.kind].push(evt);
+  // Time per stage: orchestrator logs record stage events in entry.event
+  // Parse event timestamps to compute stage durations
+  const eventsByStageStart: Record<string, string> = {};
+  const eventsByStageEnd: Record<string, string> = {};
+  for (const log of logs) {
+    if (log.kind === "orchestrator" && typeof log.entry === "object" && log.entry !== null) {
+      const evt = (log.entry as any).event;
+      const stage = evt?.split("_")?.[0];
+      if (evt?.endsWith("_started")) eventsByStageStart[stage] = log.at;
+      if (evt?.endsWith("_complete")) eventsByStageEnd[stage] = log.at;
+    }
   }
 
   const stages = ["ingest", "detect", "diagnose", "repair", "verify"];
   const avgTimePerStageMs: Record<string, number> = {};
   for (const stage of stages) {
-    const startEvts = eventsByKind[`${stage}_started`] || [];
-    const endEvts = eventsByKind[`${stage}_complete`] || [];
-    if (startEvts.length > 0 && endEvts.length > 0) {
-      const startTime = new Date(startEvts[startEvts.length - 1].at).getTime();
-      const endTime = new Date(endEvts[endEvts.length - 1].at).getTime();
+    if (eventsByStageStart[stage] && eventsByStageEnd[stage]) {
+      const startTime = new Date(eventsByStageStart[stage]).getTime();
+      const endTime = new Date(eventsByStageEnd[stage]).getTime();
       avgTimePerStageMs[stage] = Math.round(endTime - startTime);
     }
   }
@@ -46,10 +50,19 @@ export async function buildReport(store: Store, runId: string): Promise<RunRepor
 
   const successRate = patches.length > 0 ? patchesVerified / patches.length : 0;
 
-  // Estimated cost: diagnose ($0.002 per call), repair ($0.005 per attempt), challenger ($0.002 per gate)
-  // This is placeholder; real costs come from Gemini pricing
+  // Estimated cost: tally gemini log tokens (input + output per interaction)
+  // Gemini pricing: ~$0.075/1M input, ~$0.3/1M output (Claude 3.5 Sonnet approximate)
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  for (const log of logs) {
+    if (log.kind === "gemini" && typeof log.entry === "object" && log.entry !== null) {
+      const entry = log.entry as any;
+      totalInputTokens += entry.usageMetadata?.promptTokenCount || 0;
+      totalOutputTokens += entry.usageMetadata?.candidatesTokenCount || 0;
+    }
+  }
   const estimatedCostPerFix =
-    (diagnoses.length * 0.002 + patches.length * 0.005 + patches.length * 0.002) / Math.max(patchesMerged, 1);
+    totalInputTokens * 0.000000075 + totalOutputTokens * 0.0000003 / Math.max(patchesMerged, 1);
 
   // Per-finding journey
   const findingJourneys = findings.map((f) => {
@@ -74,9 +87,9 @@ export async function buildReport(store: Store, runId: string): Promise<RunRepor
       lineStart: f.lineStart,
       reproducible: f.reproducible,
       diagnosedAt: diagnosis?.createdAt,
-      patchedAt: patch?.createdAt || undefined,
-      verifiedAt: patch?.status === "verified" || patch?.status === "merged" ? new Date().toISOString() : undefined,
-      mergedAt: patch?.status === "merged" ? new Date().toISOString() : undefined,
+      patchedAt: diagnosis?.createdAt || undefined,
+      verifiedAt: patch?.status === "verified" || patch?.status === "merged" ? diagnosis?.createdAt : undefined,
+      mergedAt: patch?.status === "merged" ? diagnosis?.createdAt : undefined,
       status,
     };
   });

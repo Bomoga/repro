@@ -171,7 +171,7 @@ export const RunEvent = z.object({
     "patch_merged",
   ]),
   at: z.string(), // ISO 8601
-  data: z.record(z.any()).optional(),
+  data: z.record(z.string(), z.any()).optional(),
 });
 export type RunEvent = z.infer<typeof RunEvent>;
 
@@ -192,7 +192,7 @@ export const RunReport = z.object({
     regressionsFound: z.number().int(),
     successRate: z.number(), // patchesVerified / patchesAttempted, 0..1
     totalDurationMs: z.number().int(),
-    avgTimePerStageMs: z.record(z.number().int()),
+    avgTimePerStageMs: z.record(z.string(), z.number().int()),
     estimatedCostPerFix: z.number(), // USD
   }),
   findings: z.array(
@@ -210,6 +210,5 @@ export const RunReport = z.object({
       status: z.enum(["detected", "reproduced", "diagnosed", "repaired", "verified", "merged", "rejected"]),
     })
   ),
-  summary: z.string().optional(), // Model-written, must cite only published stats
 });
 export type RunReport = z.infer<typeof RunReport>;

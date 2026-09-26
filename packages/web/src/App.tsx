@@ -93,7 +93,7 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
   const [patches, setPatches] = useState<Patch[]>([]);
   const [reports, setReports] = useState<Record<string, TrustReport>>({});
   const [runReport, setRunReport] = useState<RunReport | null>(null);
-  const [expandedTab, setExpandedTab] = useState<"findings" | "patches" | "report">("report");
+  const [expandedTab, setExpandedTab] = useState<"findings" | "diagnoses" | "patches" | "report">("report");
 
   useEffect(() => {
     api.listFindings(runId).then(setFindings);
@@ -149,6 +149,21 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
           }}
         >
           Findings ({findings.length})
+        </button>
+        <button
+          onClick={() => setExpandedTab("diagnoses")}
+          style={{
+            padding: "0.5rem 1rem",
+            background: expandedTab === "diagnoses" ? "#0066ff" : "transparent",
+            color: expandedTab === "diagnoses" ? "#fff" : "#666",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "0.9rem",
+            fontWeight: 600,
+            borderRadius: 0,
+          }}
+        >
+          Diagnoses ({diagnoses.length})
         </button>
         <button
           onClick={() => setExpandedTab("patches")}
@@ -207,6 +222,25 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
         {findings.map((f) => (
           <li key={f.id}>
             <strong>{f.severity}</strong> {f.file}:{f.lineStart} — {f.message}
+          </li>
+        ))}
+      </ul>
+        </div>
+      )}
+
+      {/* Diagnoses Tab */}
+      {expandedTab === "diagnoses" && (
+        <div>
+      <h3>Diagnoses ({diagnoses.length})</h3>
+      <ul>
+        {diagnoses.map((d) => (
+          <li key={d.id} style={{ marginBottom: "1rem" }}>
+            <div><strong>Root cause:</strong> {d.rootCause}</div>
+            <div><strong>Strategy:</strong> {d.proposedStrategy}</div>
+            <div><strong>Risk:</strong> {d.riskNotes}</div>
+            <div style={{ marginTop: "0.5rem", fontSize: "0.9rem", color: "#666" }}>
+              Findings: {d.findingIds.join(", ")}
+            </div>
           </li>
         ))}
       </ul>
