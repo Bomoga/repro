@@ -4,19 +4,19 @@
 import type * as z from "zod";
 import type {
   ChallengerVerdictSchema,
-  DiagnosisSchema,
-  ExecRequestSchema,
-  ExecResultSchema,
-  FindingSchema,
-  PatchSchema,
+  Diagnosis as DiagnosisSchema,
+  ExecRequest as ExecRequestSchema,
+  ExecResult as ExecResultSchema,
+  Finding as FindingSchema,
+  Patch as PatchSchema,
   PatchStatusSchema,
-  RunSchema,
-  RunStageSchema,
-  RunStatusSchema,
-  RunTargetSchema,
-  RunTriggerSchema,
+  Run as RunSchema,
+  RunStage as RunStageSchema,
+  RunStatus as RunStatusSchema,
+  RunTarget as RunTargetSchema,
+  RunTrigger as RunTriggerSchema,
   SeveritySchema,
-  WorkspaceSchema,
+  Workspace as WorkspaceSchema,
 } from "./schemas.js";
 
 // ---------------------------------------------------------------------------------------------

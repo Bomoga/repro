@@ -8,7 +8,8 @@
 // work on it, and Gemini's structured-output schemas derive from it without drift.
 //
 // The two *pending* fields, Finding.reproductionOutput and Patch.reproductionOutputAfter, are
-// not adopted. z.object strips unknown keys, so parsing an object that carries either one drops it.
+// now adopted as optional. They make the before-and-after of a fix literally visible rather than
+// asserted.
 import * as z from "zod";
 
 // ---------------------------------------------------------------------------------------------
@@ -27,7 +28,7 @@ export const KNOWN_CATEGORIES = ["vulnerability", "inefficiency", "correctness",
 // reproduction step flips it to true, by running `reproductionCommand` through the Executor and
 // confirming the result demonstrates the issue; never a detector's own confidence, never Diagnose
 // or Repair. With no `reproductionCommand`, it stays false and the Finding is unconfirmed input.
-export const FindingSchema = z.object({
+export const Finding = z.object({
   id: z.string(),
   detectorId: z.string().describe('Matches DetectorAdapter.id, e.g. "semgrep", "gitleaks", "custom-ast:null-deref"'),
   ruleId: z.string(),
@@ -42,6 +43,7 @@ export const FindingSchema = z.object({
     .boolean()
     .describe("False when emitted; only the reproduction step, via the Executor, sets it to true"),
   reproductionCommand: z.string().optional(),
+  reproductionOutput: z.string().optional().describe("Verbatim Executor output that flipped reproducible to true"),
   createdAt: z.string().describe("ISO 8601 timestamp"),
 });
 
@@ -51,7 +53,7 @@ export const FindingSchema = z.object({
 // `findingIds`: their evidence, file locations, and messages. Surrounding code may inform the
 // explanation but is never authoritative, and no new issue is introduced here; a new issue is a
 // new Finding, produced by Detect.
-export const DiagnosisSchema = z.object({
+export const Diagnosis = z.object({
   id: z.string(),
   findingIds: z.array(z.string()).describe("IDs of the Findings this Diagnosis explains"),
   rootCause: z.string(),
@@ -71,41 +73,42 @@ export const PatchStatusSchema = z.enum(["proposed", "verified", "rejected", "me
 // with `git apply` against Workspace.headCommit; never prose, never a full-file replacement.
 // `status` only advances proposed -> verified -> merged, or terminates at rejected. Only the
 // Verification / Challenger Gate sets `verified`; only a human merging the PR sets `merged`.
-export const PatchSchema = z.object({
+export const Patch = z.object({
   id: z.string(),
   diagnosisId: z.string(),
   diff: z.string().describe("Unified diff: the literal output of `git diff` against Workspace.headCommit"),
   filesChanged: z.array(z.string()),
   testsPassed: z.boolean(),
   originalFindingReproduces: z.boolean().describe("false means the original Finding is confirmed fixed"),
-  regressionFindings: z.array(FindingSchema).describe("New Findings the patch introduced; should be empty"),
+  reproductionOutputAfter: z.string().optional().describe("ExecResult from re-running the original reproduction command after the patch"),
+  regressionFindings: z.array(Finding).describe("New Findings the patch introduced; should be empty"),
   challengerVerdict: ChallengerVerdictSchema,
   challengerNotes: z.string().optional(),
   status: PatchStatusSchema,
   prUrl: z.string().optional(),
 });
 
-export const RunTriggerSchema = z.enum(["manual", "schedule", "webhook"]);
+export const RunTrigger = z.enum(["manual", "schedule", "webhook"]);
 
-export const RunTargetSchema = z.object({
+export const RunTarget = z.object({
   kind: z.enum(["local", "github"]),
   ref: z.string(),
 });
 
-export const RunStageSchema = z.enum(["ingest", "detect", "diagnose", "repair", "verify", "done"]);
+export const RunStage = z.enum(["ingest", "detect", "diagnose", "repair", "verify", "done"]);
 
-export const RunStatusSchema = z.enum(["queued", "running", "blocked", "completed", "failed"]);
+export const RunStatus = z.enum(["queued", "running", "blocked", "completed", "failed"]);
 
 // Owned by the Run Orchestrator. One row per pipeline execution.
 //
 // Semantics: `stage` is the pipeline stage currently in flight, not the last one completed; a Run
 // showing "repair" means Repair is running now.
-export const RunSchema = z.object({
+export const Run = z.object({
   id: z.string(),
-  trigger: RunTriggerSchema,
-  target: RunTargetSchema,
-  stage: RunStageSchema.describe("The stage currently in flight, not the last one completed"),
-  status: RunStatusSchema,
+  trigger: RunTrigger,
+  target: RunTarget,
+  stage: RunStage.describe("The stage currently in flight, not the last one completed"),
+  status: RunStatus,
   startedAt: z.string().describe("ISO 8601 timestamp"),
   logRef: z.string(),
 });
@@ -120,7 +123,7 @@ export const RunSchema = z.object({
 // Semantics: `headCommit` is the single source of truth for what code produced a Finding. If the
 // target moves mid-run, this Run keeps working against its own `headCommit`. `fileIndex` is a
 // snapshot taken at ingest time; Detect does not re-walk the tree.
-export const WorkspaceSchema = z.object({
+export const Workspace = z.object({
   runId: z.string(),
   path: z.string().describe("Sandbox-local path to the cloned or mounted code"),
   fileIndex: z.array(z.string()).describe("Every tracked file's path, relative to `path`, snapshotted at ingest"),
@@ -129,7 +132,7 @@ export const WorkspaceSchema = z.object({
 });
 
 // Input to the Executor, the sandboxed command runner.
-export const ExecRequestSchema = z.object({
+export const ExecRequest = z.object({
   workspacePath: z.string().describe("From Workspace.path"),
   command: z.string(),
   timeoutMs: z.number().int().positive(),
@@ -141,7 +144,7 @@ export const ExecRequestSchema = z.object({
 // section 9. A non-zero `exitCode` is not a failure signal for the Executor to interpret; the
 // caller decides what its own command's exit codes mean. One ExecResult per ExecRequest, no
 // streaming, no partial results.
-export const ExecResultSchema = z.object({
+export const ExecResult = z.object({
   exitCode: z.number().int(),
   stdout: z.string(),
   stderr: z.string(),
