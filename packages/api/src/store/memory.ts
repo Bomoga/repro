@@ -18,6 +18,7 @@ import {
   StoreError,
   type FindingQuery,
   type NewRun,
+  type OpenPullRequest,
   type PatchDecision,
   type RunCounts,
   type RunLogRecord,
@@ -185,6 +186,12 @@ export class InMemoryRunStore implements RunStore {
     const next = decidedPatch(found.record.patches[found.index]!, decision);
     found.record.patches[found.index] = next;
     return copy(next);
+  }
+
+  async listOpenPullRequests(): Promise<OpenPullRequest[]> {
+    return [...this.runs].flatMap(([runId, record]) =>
+      record.patches.filter((patch) => patch.status === "verified" && patch.prUrl).map((patch) => ({ runId, patch: copy(patch) })),
+    );
   }
 
   async claimNextQueued(): Promise<Run | null> {

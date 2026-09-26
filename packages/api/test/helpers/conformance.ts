@@ -249,6 +249,23 @@ export function describeRunStore(name: string, open: () => Promise<RunStore>): v
         expect(stored).not.toHaveProperty("challengerNotes");
       });
 
+      it("lists verified patches whose PR nobody has merged or closed yet", async () => {
+        const { run, diagnosis } = await runWithDiagnosis();
+        const other = await runWithDiagnosis();
+        const awaiting = aVerifiedPatch(diagnosis.id, { prUrl: "https://github.com/octo/example/pull/1" });
+        const noPr = aVerifiedPatch(diagnosis.id);
+        const merged = aVerifiedPatch(diagnosis.id, { prUrl: "https://github.com/octo/example/pull/2" });
+        const elsewhere = aVerifiedPatch(other.diagnosis.id, { prUrl: "https://github.com/octo/example/pull/3" });
+        for (const patch of [awaiting, noPr, merged, aProposedPatch(diagnosis.id)]) await store.savePatch(run.id, patch);
+        await store.savePatch(other.run.id, elsewhere);
+        await store.setPatchDecision(merged.id, "merge");
+
+        expect(await store.listOpenPullRequests()).toEqual([
+          { runId: run.id, patch: awaiting },
+          { runId: other.run.id, patch: elsewhere },
+        ]);
+      });
+
       it("merges or rejects a verified patch, and nothing else", async () => {
         const { run, diagnosis } = await runWithDiagnosis();
         const toMerge = aVerifiedPatch(diagnosis.id);

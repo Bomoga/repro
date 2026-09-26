@@ -18,6 +18,7 @@ import {
   StoreError,
   type FindingQuery,
   type NewRun,
+  type OpenPullRequest,
   type PatchDecision,
   type RunCounts,
   type RunLogRecord,
@@ -242,6 +243,11 @@ export class MongoRunStore implements RunStore {
     if (!current) throw notFound("patch", patchId);
     const next = decidedPatch(current, decision);
     return write(this.store.patches.transition(patchId, next.status));
+  }
+
+  async listOpenPullRequests(): Promise<OpenPullRequest[]> {
+    const docs = await this.models.Patch.find({ status: "verified", prUrl: { $type: "string" } }).sort({ _id: 1 }).lean();
+    return docs.map((doc) => ({ runId: doc.runId, patch: Patch.parse(doc) }));
   }
 
   async claimNextQueued(): Promise<Run | null> {

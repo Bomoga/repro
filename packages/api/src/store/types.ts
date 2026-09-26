@@ -44,6 +44,12 @@ export interface RunCounts {
 
 export type PatchDecision = "merge" | "reject";
 
+/** A verified Patch whose PR is open: nobody has merged or closed it yet. */
+export interface OpenPullRequest {
+  runId: string;
+  patch: Patch;
+}
+
 /** One entry of a Run's retained prompt and tool-call log (section 9). */
 export interface RunLogRecord {
   at: string;
@@ -99,6 +105,8 @@ export interface RunStore {
   savePatch(runId: string, patch: Patch): Promise<Patch>;
   /** A person's merge/reject on a verified Patch: the only way a Patch reaches "merged". */
   setPatchDecision(patchId: string, decision: PatchDecision): Promise<Patch>;
+  /** Verified Patches with a `prUrl` that no one has merged or closed yet, in the order stored. */
+  listOpenPullRequests(): Promise<OpenPullRequest[]>;
 
   // Orchestrator ------------------------------------------------------------------------------
   /** The work queue: moves the oldest queued Run to running and returns it, atomically, so two
