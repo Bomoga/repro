@@ -1,0 +1,186 @@
+{
+ "results": [
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.prompt-logging.js",
+   "path": "assistant/chat.ts",
+   "start": {
+    "line": 4,
+    "col": 3,
+    "offset": 101
+   },
+   "end": {
+    "line": 4,
+    "col": 40,
+    "offset": 138
+   },
+   "extra": {
+    "message": "Prompt or conversation content (`user prompt: ${prompt) is written to a log without redaction. Logs are usually retained and shared far more widely than the conversation itself.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "prompt-logging",
+     "cwe": [
+      "CWE-532: Insertion of Sensitive Information into Log File"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.third-party-forwarding.js",
+   "path": "assistant/chat.ts",
+   "start": {
+    "line": 6,
+    "col": 9,
+    "offset": 149
+   },
+   "end": {
+    "line": 9,
+    "col": 5,
+    "offset": 264
+   },
+   "extra": {
+    "message": "User-supplied content (JSON.stringify({ prompt })) is sent to https://collect.adtrack.example/v1/events, which is not a recognized model-provider endpoint. Confirm the tool discloses this third party to the people whose data it sends.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "third-party-forwarding",
+     "cwe": [
+      "CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "ERROR",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.unencrypted-conversation-storage.js",
+   "path": "assistant/chat.ts",
+   "start": {
+    "line": 12,
+    "col": 3,
+    "offset": 293
+   },
+   "end": {
+    "line": 12,
+    "col": 64,
+    "offset": 354
+   },
+   "extra": {
+    "message": "Conversation history is written to local storage without encryption. Anyone with access to the device or profile can read it.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "unencrypted-conversation-storage",
+     "cwe": [
+      "CWE-312: Cleartext Storage of Sensitive Information"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.oauth-broad-scope.google.js",
+   "path": "assistant/chat.ts",
+   "start": {
+    "line": 17,
+    "col": 12,
+    "offset": 428
+   },
+   "end": {
+    "line": 17,
+    "col": 51,
+    "offset": 467
+   },
+   "extra": {
+    "message": "Requests the broad Google OAuth scope https://www.googleapis.com/auth/drive. Confirm the tool's stated functionality actually needs this level of access to the user's account.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "oauth-broad-scope",
+     "cwe": [
+      "CWE-250: Execution with Unnecessary Privileges"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.prompt-logging.py",
+   "path": "assistant/memory.py",
+   "start": {
+    "line": 8,
+    "col": 5,
+    "offset": 101
+   },
+   "end": {
+    "line": 8,
+    "col": 54,
+    "offset": 150
+   },
+   "extra": {
+    "message": "Prompt or conversation content (messages) is written to a log without redaction. Logs are usually retained and shared far more widely than the conversation itself.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "prompt-logging",
+     "cwe": [
+      "CWE-532: Insertion of Sensitive Information into Log File"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.unencrypted-conversation-storage.py",
+   "path": "assistant/memory.py",
+   "start": {
+    "line": 10,
+    "col": 9,
+    "offset": 191
+   },
+   "end": {
+    "line": 10,
+    "col": 32,
+    "offset": 214
+   },
+   "extra": {
+    "message": "Conversation history is written to local storage without encryption. Anyone with access to the device or profile can read it.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "unencrypted-conversation-storage",
+     "cwe": [
+      "CWE-312: Cleartext Storage of Sensitive Information"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  }
+ ],
+ "errors": [],
+ "profiling_results": []
+}
