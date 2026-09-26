@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MongoRunStore, openRunStore } from "../src/store/index.ts";
+import { InMemoryRunStore, MongoRunStore, openRunStore } from "../src/store/index.ts";
+import { seedDemoData } from "../src/seed.ts";
 import { describeRunStore } from "./helpers/conformance.ts";
 import { aDiagnosis, aReproducedFinding, aRun } from "./helpers/fixtures.ts";
 import { freshDbName, MONGO_STARTUP_TIMEOUT_MS, skipMongo, startTestMongo, type TestMongo } from "./helpers/mongo.ts";
@@ -73,6 +74,28 @@ describe.skipIf(skipMongo)("MongoRunStore", () => {
     await store.ping();
     await store.close();
     await expect(store.ping()).rejects.toThrow();
+  });
+
+  it("seeds the same demo data the in-memory store gets, once", async () => {
+    const now = new Date("2026-09-26T12:00:00.000Z");
+    const store = await connect(fresh("seed"));
+    const memory = new InMemoryRunStore();
+    const first = await seedDemoData(store, { now });
+    await seedDemoData(memory, { now });
+    expect(first.skipped).toEqual([]);
+
+    const again = await seedDemoData(store, { now });
+    expect(again).toEqual({ seeded: [], skipped: first.seeded });
+
+    const ids = first.seeded;
+    expect(await store.listRuns()).toEqual(await memory.listRuns());
+    expect(await store.countRuns(ids)).toEqual(await memory.countRuns(ids));
+    for (const id of ids) {
+      expect(await store.listFindings(id)).toEqual(await memory.listFindings(id));
+      expect(await store.listDiagnoses(id)).toEqual(await memory.listDiagnoses(id));
+      expect(await store.listPatches(id)).toEqual(await memory.listPatches(id));
+    }
+    await store.close();
   });
 
   it("is what openRunStore picks when MONGODB_URI is set", async () => {
