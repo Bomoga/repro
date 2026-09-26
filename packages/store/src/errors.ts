@@ -89,6 +89,15 @@ export class InvalidPatchTransitionError extends StoreError {
   }
 }
 
+/** A Patch changed between being read and being replaced; the caller reloads it and decides again. */
+export class PatchChangedError extends StoreError {
+  readonly patchId: string;
+  constructor(patchId: string) {
+    super(`patch ${patchId} changed while it was being replaced; reload it`);
+    this.patchId = patchId;
+  }
+}
+
 /** Section 5: `verified` only when every deterministic gate input holds. */
 export class GateNotSatisfiedError extends StoreError {
   readonly patchId: string;

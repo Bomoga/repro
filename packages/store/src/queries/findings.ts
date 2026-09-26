@@ -76,17 +76,25 @@ export function findingQueries(models: StoreModels) {
 
     /**
      * Called by the reproduction step, and nothing else, once running the Finding's
-     * `reproductionCommand` through the Executor has demonstrated the issue. Idempotent.
+     * `reproductionCommand` through the Executor has demonstrated the issue. `reproductionOutput`
+     * is that run's verbatim excerpt, stored with the flip and never edited afterward.
+     * Idempotent: a Finding that's already reproducible comes back as stored.
      */
-    async markReproducible(id: string): Promise<Finding> {
+    async markReproducible(id: string, reproductionOutput?: string): Promise<Finding> {
+      const set: Record<string, unknown> = { reproducible: true };
+      if (reproductionOutput !== undefined) {
+        set.reproductionOutput = FindingSchema.shape.reproductionOutput.unwrap().parse(reproductionOutput);
+      }
       const doc = await FindingModel.findOneAndUpdate(
-        { id, reproductionCommand: { $type: "string", $ne: "" } },
-        { $set: { reproducible: true } },
+        { id, reproducible: false, reproductionCommand: { $type: "string", $ne: "" } },
+        { $set: set },
         { returnDocument: "after" },
       ).lean();
       if (doc) return FindingSchema.parse(doc);
-      if (await FindingModel.exists({ id })) throw new NotReproducibleError(id);
-      throw new FindingNotFoundError(id);
+      const existing = await FindingModel.findOne({ id }).lean();
+      if (!existing) throw new FindingNotFoundError(id);
+      if (existing.reproducible) return FindingSchema.parse(existing);
+      throw new NotReproducibleError(id);
     },
   };
 }

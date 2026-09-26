@@ -12,6 +12,7 @@ import {
   DiagnosisNotFoundError,
   GateNotSatisfiedError,
   InvalidPatchTransitionError,
+  PatchChangedError,
   PatchNotFoundError,
   RunNotFoundError,
   StoreError,
@@ -77,6 +78,37 @@ export function patchQueries(models: StoreModels) {
         throw new DiagnosisNotFoundError(parsed.diagnosisId);
       }
       await insertOnce(PatchModel, runId, [parsed]);
+      return load(parsed.id);
+    },
+
+    /**
+     * Replaces a stored Patch as Repair and the gate refine it: the Challenger's verdict and
+     * notes, a re-run's output. It stays on its Run and Diagnosis, and its status may stay or move
+     * along PATCH_TRANSITIONS, but never to `merged`, which only `transition` sets for a human's
+     * merge. `verified` needs the gate, and a merged or rejected Patch never changes. The whole
+     * document is replaced, so an optional field left out is cleared. Atomic on the stored status,
+     * so a concurrent transition fails this write instead of being overwritten by it.
+     */
+    async replace(runId: string, patch: Patch): Promise<Patch> {
+      const parsed = PatchSchema.parse(patch);
+      if (parsed.status === "merged") {
+        throw new StoreError(`patch ${parsed.id} can't be stored as merged; only a human merging its PR sets merged`);
+      }
+      if (parsed.status === "verified") {
+        const failures = gateFailures(parsed);
+        if (failures.length > 0) throw new GateNotSatisfiedError(parsed.id, failures);
+      }
+      const current = await PatchModel.findOne({ id: parsed.id }).lean();
+      if (!current) throw new PatchNotFoundError(parsed.id);
+      if (current.runId !== runId || current.diagnosisId !== parsed.diagnosisId) {
+        throw new StoreError(`patch ${parsed.id} can't move to another run or diagnosis`);
+      }
+      const final = current.status === "merged" || current.status === "rejected";
+      if (final || (parsed.status !== current.status && !PATCH_TRANSITIONS[parsed.status].includes(current.status))) {
+        throw new InvalidPatchTransitionError(parsed.id, current.status, parsed.status);
+      }
+      const result = await PatchModel.replaceOne({ id: parsed.id, runId, status: current.status }, { ...parsed, runId });
+      if (result.matchedCount === 0) throw new PatchChangedError(parsed.id);
       return load(parsed.id);
     },
 
