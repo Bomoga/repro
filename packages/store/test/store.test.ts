@@ -143,6 +143,14 @@ describe("runs", () => {
     expect(await store.runs.claimNextQueued()).toBeNull();
   });
 
+  it("claims one specific queued run exactly once", async () => {
+    await newRun({ id: "mine" });
+    const [a, b] = await Promise.all([store.runs.claim("mine"), store.runs.claim("mine")]);
+    expect([a, b].filter((run) => run !== null)).toEqual([expect.objectContaining({ id: "mine", status: "running" })]);
+    expect(await store.runs.claim("mine")).toBeNull();
+    expect(await store.runs.claim("missing")).toBeNull();
+  });
+
   it("completes at done, fails in place, and never changes once finished", async () => {
     await newRun({ id: "ok" });
     await store.runs.setStage("ok", "verify");
@@ -330,6 +338,27 @@ describe("patches", () => {
       failedChecks: ["the original finding still reproduces", "the Challenger disputed the patch"],
     });
     expect((await store.patches.transition("p1", "rejected")).status).toBe("rejected");
+  });
+
+  it("records Verify's results on a proposed patch without touching its status", async () => {
+    const run = await seeded();
+    await store.patches.insert(run.id, patch("p1", "d1", { challengerVerdict: "disputed", reproductionOutputAfter: "0 results" }));
+    const recorded = await store.patches.recordVerification("p1", {
+      challengerVerdict: "confirmed",
+      challengerNotes: "counter-test fails before, passes after",
+      reproductionOutputAfter: undefined,
+    });
+    expect(recorded).toMatchObject({
+      status: "proposed",
+      challengerVerdict: "confirmed",
+      challengerNotes: "counter-test fails before, passes after",
+      reproductionOutputAfter: "0 results",
+      testsPassed: true,
+    });
+    expect((await store.patches.transition("p1", "verified")).status).toBe("verified");
+    await expect(store.patches.recordVerification("p1", { challengerVerdict: "disputed" })).rejects.toThrow(/only a proposed patch/);
+    await expect(store.patches.recordVerification("ghost", { challengerVerdict: "confirmed" })).rejects.toThrow(/not found/);
+    await expect(store.patches.recordVerification("p1", { challengerVerdict: "maybe" as never })).rejects.toThrow();
   });
 
   it("lets exactly one of a racing merge and reject win", async () => {
