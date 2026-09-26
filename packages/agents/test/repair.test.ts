@@ -7,6 +7,7 @@ import { MAX_TOOL_CALLS, detectTestCommand, repair, type RepairDeps } from "../s
 import { WorkspaceFiles } from "../src/workspace-files.js";
 import { KEY_DIAGNOSIS, SQLI_DIAGNOSIS, UNCONFIRMED_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
+import { NOTE_NEW, NOTE_OLD, OWNER_ESCAPED, OWNER_NEW, OWNER_OLD } from "./fixtures/scripts.js";
 import { FixtureExecutor, demoTargetHandlers } from "./helpers/executor.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
@@ -27,11 +28,6 @@ function scriptedRepairGemini(turns: Turn[] | ((turn: number) => Turn)) {
   };
   return { gemini, requests };
 }
-
-const OWNER_OLD = `  const sql = "SELECT id, title, body FROM notes WHERE owner_id = '" + ownerId + "' ORDER BY id";\n  return db.query(sql);`;
-const OWNER_NEW = "  const sql = 'SELECT id, title, body FROM notes WHERE owner_id = $1 ORDER BY id';\n  return db.query(sql, [ownerId]);";
-const NOTE_OLD = "  const sql = 'SELECT id, owner_id, title, body FROM notes WHERE id = ' + noteId;\n  const rows = db.query(sql);";
-const NOTE_NEW = "  const sql = 'SELECT id, owner_id, title, body FROM notes WHERE id = $1';\n  const rows = db.query(sql, [noteId]);";
 
 const fullFix: Turn[] = [
   [{ name: "read_file", args: { path: "src/db.js" } }],
@@ -114,9 +110,8 @@ describe("repair", () => {
   });
 
   it("fails closed on a symptom-only fix: the reproduction re-run still flags it", async () => {
-    const escaped = `  const sql = "SELECT id, title, body FROM notes WHERE owner_id = '" + ownerId.replace(/'/g, "''") + "' ORDER BY id";\n  return db.query(sql);`;
     const { gemini } = scriptedRepairGemini([
-      [{ name: "replace_in_file", args: { path: "src/db.js", old_text: OWNER_OLD, new_text: escaped } }],
+      [{ name: "replace_in_file", args: { path: "src/db.js", old_text: OWNER_OLD, new_text: OWNER_ESCAPED } }],
       [{ name: "finish", args: { summary: "Escaped quotes." } }],
     ]);
     const run = await repair({ diagnosis: SQLI_DIAGNOSIS, findings: FIXTURE_FINDINGS, workspace: fixture.workspace }, deps(gemini));

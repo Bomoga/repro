@@ -7,10 +7,17 @@ import { DEMO_TARGET } from "./workspace.js";
 export type CommandHandler = (request: ExecRequest) => ExecResult | undefined;
 
 /**
- * Test double for the sandboxed Executor. Harness-issued `git …` commands run for real against
+ * Exactly the git commands the harness (Sandbox) issues. Anything else, including a
+ * model-chosen counter-test command that happens to start with `git`, never reaches the host.
+ */
+const HARNESS_GIT =
+  /^git -c core\.quotepath=off (reset --hard --quiet [0-9a-f]{7,64}|diff --no-color --no-ext-diff --no-textconv [0-9a-f]{7,64}|diff --name-only --no-renames [0-9a-f]{7,64}|apply --whitespace=nowarn \.repro\/[A-Za-z0-9._-]+\.diff)$/;
+
+/**
+ * Test double for the sandboxed Executor. The harness's own git commands run for real against
  * the throwaway fixture repo the test created (trusted content). Everything else must be
- * answered by a handler: code a model edited is never executed on the host (section 9), so
- * tests and detectors are answered by static oracles instead.
+ * answered by a handler: code or commands a model wrote are never executed on the host
+ * (section 9), so tests, detectors, and counter-tests are answered by static oracles instead.
  */
 export class FixtureExecutor implements Executor {
   readonly requests: ExecRequest[] = [];
@@ -23,7 +30,7 @@ export class FixtureExecutor implements Executor {
       const result = handler(request);
       if (result) return result;
     }
-    if (/^git\s/.test(request.command)) return runGit(request);
+    if (HARNESS_GIT.test(request.command)) return runGit(request);
     return result(127, "", `FixtureExecutor has no handler for: ${request.command}`);
   }
 
@@ -116,8 +123,51 @@ export function demoTargetTests(request: ExecRequest): ExecResult {
 export const SEMGREP_COMMAND = /^semgrep .*node-postgres-sqli/;
 export const GITLEAKS_COMMAND = /^gitleaks /;
 
+function functionBody(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) return "";
+  const end = source.indexOf("\n}", start);
+  return source.slice(start, end < 0 ? undefined : end);
+}
+
+/** True when `param` reaches db.query only as a bound parameter. */
+export function passedAsParameter(source: string, fn: string, param: string): boolean {
+  const body = functionBody(source, fn);
+  const bound = new RegExp(`db\\.query\\([^;]*\\[\\s*${param}\\s*\\]`).test(body);
+  const spliced = new RegExp(`\\+\\s*${param}\\b|\\$\\{\\s*${param}\\b|\\b${param}\\s*\\]\\s*\\.join`).test(body);
+  return bound && !spliced;
+}
+
+/**
+ * Oracle for `node --test <file>` counter-tests. Model-written tests are never executed on the
+ * host, so each fixture counter-test names the property it checks with a `CHECKS:` marker and
+ * the oracle evaluates that property against whichever tree is on disk.
+ */
+export function counterTestOracle(request: ExecRequest): ExecResult | undefined {
+  const match = /^node --test (\S+)$/.exec(request.command);
+  if (!match) return undefined;
+  let code: string;
+  try {
+    code = read(request.workspacePath, match[1]!);
+  } catch {
+    return result(1, "", `Could not find '${match[1]}'`);
+  }
+  const db = read(request.workspacePath, "src/db.js");
+  const verdict = (ok: boolean, what: string) => (ok ? result(0, `# pass 1\n# fail 0 (${what})`) : result(1, `not ok 1 - ${what}\n# fail 1`));
+  if (code.includes("CHECKS:numeric-injection")) return verdict(passedAsParameter(db, "getNoteById", "noteId"), "getNoteById binds noteId");
+  if (code.includes("CHECKS:owner-injection")) return verdict(passedAsParameter(db, "findNotesByOwner", "ownerId"), "findNotesByOwner binds ownerId");
+  if (code.includes("CHECKS:old-sql-text")) return verdict(db.includes("' + noteId"), "SQL text still embeds noteId");
+  if (code.includes("CHECKS:always-fails")) return result(1, "SyntaxError: Unexpected token");
+  return result(1, "", "counterTestOracle: no CHECKS marker in this test");
+}
+
 export function demoTargetHandlers(secret: string): CommandHandler[] {
-  return [on(/^npm test$/, demoTargetTests), on(SEMGREP_COMMAND, semgrepSqli), on(GITLEAKS_COMMAND, gitleaksConfig(secret))];
+  return [
+    on(/^npm test$/, demoTargetTests),
+    on(SEMGREP_COMMAND, semgrepSqli),
+    on(GITLEAKS_COMMAND, gitleaksConfig(secret)),
+    counterTestOracle,
+  ];
 }
 
 /** Stand-in for Lane 2's semgrep adapter over demo-target, built on the same oracle. */
