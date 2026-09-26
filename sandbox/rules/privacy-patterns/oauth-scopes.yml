@@ -1,0 +1,83 @@
+# privacy-patterns (Assurant, CLAUDE.md section 8). Note: semgrep metavariable-regex is anchored at
+# the start of the bound text, so "contains" checks are written as ".*(...)".
+rules:
+  - id: privacy.oauth-broad-scope.google.js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Requests the broad Google OAuth scope $SCOPE. Confirm the tool's stated functionality
+      actually needs this level of access to the user's account.
+    metadata:
+      category: privacy
+      privacy-check: oauth-broad-scope
+      cwe: ["CWE-250: Execution with Unnecessary Privileges"]
+      confidence: MEDIUM
+    patterns:
+      - pattern: '"$SCOPE"'
+      - metavariable-regex:
+          metavariable: $SCOPE
+          regex: ^https://(www\.googleapis\.com/auth/(drive|gmail\.modify|gmail\.compose|gmail\.send|cloud-platform|contacts|calendar|admin\.directory\.[a-z.]+)|mail\.google\.com/?)$
+
+  - id: privacy.oauth-broad-scope.google.py
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Requests the broad Google OAuth scope $SCOPE. Confirm the tool's stated functionality
+      actually needs this level of access to the user's account.
+    metadata:
+      category: privacy
+      privacy-check: oauth-broad-scope
+      cwe: ["CWE-250: Execution with Unnecessary Privileges"]
+      confidence: MEDIUM
+    patterns:
+      - pattern: '"$SCOPE"'
+      - metavariable-regex:
+          metavariable: $SCOPE
+          regex: ^https://(www\.googleapis\.com/auth/(drive|gmail\.modify|gmail\.compose|gmail\.send|cloud-platform|contacts|calendar|admin\.directory\.[a-z.]+)|mail\.google\.com/?)$
+
+  - id: privacy.oauth-broad-scope.js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Requests broad OAuth scopes ($SCOPES). Confirm the tool's stated functionality actually
+      needs this level of access to the user's account.
+    metadata:
+      category: privacy
+      privacy-check: oauth-broad-scope
+      cwe: ["CWE-250: Execution with Unnecessary Privileges"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: '{..., scope: $SCOPES, ...}'
+          - pattern: '{..., scopes: $SCOPES, ...}'
+          - pattern: $X.scope = $SCOPES
+          - pattern: $X.scopes = $SCOPES
+      - metavariable-regex:
+          metavariable: $SCOPES
+          regex: (?is)(.*?["'\s,\[])?(repo|admin:org|admin:repo_hook|admin:public_key|delete_repo|write:org|Mail\.ReadWrite|Files\.ReadWrite\.All|Directory\.ReadWrite\.All|Sites\.FullControl\.All|User\.ReadWrite\.All)(["'\s,\]]|$)
+
+  - id: privacy.oauth-broad-scope.py
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Requests broad OAuth scopes ($SCOPES). Confirm the tool's stated functionality actually
+      needs this level of access to the user's account.
+    metadata:
+      category: privacy
+      privacy-check: oauth-broad-scope
+      cwe: ["CWE-250: Execution with Unnecessary Privileges"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $F(..., scope=$SCOPES, ...)
+          - pattern: $F(..., scopes=$SCOPES, ...)
+          - pattern: '{..., "scope": $SCOPES, ...}'
+          - pattern: '{..., "scopes": $SCOPES, ...}'
+          - patterns:
+              - pattern: $VAR = $SCOPES
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)^[a-z_]*scopes?$
+      - metavariable-regex:
+          metavariable: $SCOPES
+          regex: (?is)(.*?["'\s,\[])?(repo|admin:org|admin:repo_hook|admin:public_key|delete_repo|write:org|Mail\.ReadWrite|Files\.ReadWrite\.All|Directory\.ReadWrite\.All|Sites\.FullControl\.All|User\.ReadWrite\.All)(["'\s,\]]|$)

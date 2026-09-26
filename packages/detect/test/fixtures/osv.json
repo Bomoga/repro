@@ -1,0 +1,42 @@
+[
+ {
+  "file": "package-lock.json",
+  "ecosystem": "npm",
+  "package": "minimist",
+  "version": "1.2.5",
+  "id": "GHSA-xvch-5gv4-984h",
+  "aliases": [
+   "CVE-2021-44906",
+   "GHSA-xvch-5gv4-984h"
+  ],
+  "cve": "CVE-2021-44906",
+  "summary": "Prototype Pollution in minimist",
+  "severity": "critical",
+  "fixed": [
+   "1.2.6",
+   "0.2.4"
+  ],
+  "lineStart": 14,
+  "lineEnd": 15
+ },
+ {
+  "file": "requirements.txt",
+  "ecosystem": "PyPI",
+  "package": "pyyaml",
+  "version": "5.3.1",
+  "id": "GHSA-8q59-q68h-6hv4",
+  "aliases": [
+   "CVE-2020-14343",
+   "GHSA-8q59-q68h-6hv4",
+   "PYSEC-2021-142"
+  ],
+  "cve": "CVE-2020-14343",
+  "summary": "Improper Input Validation in PyYAML",
+  "severity": "critical",
+  "fixed": [
+   "5.4"
+  ],
+  "lineStart": 1,
+  "lineEnd": 1
+ }
+]

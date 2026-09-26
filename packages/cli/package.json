@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node bin/repro.js",
+    "status": "node bin/repro.js status",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,73 +1,41 @@
-# Lane 4 Fallback progress
+# Lane 3 progress
 
 One line per session: what was done, what's next.
 
-- 2026-09-26 s1: built the full status surface: `@repro/api` (Fastify + tRPC, Run Store
-  queries, Trust Report), `@repro/cli` (`repro status`/`watch`/`scan`/`patch`), `@repro/github`
-  (Check Runs, PR comment, Gemini-backed PR narrator with a templated fallback), and
-  `@repro/web` (minimal React+Vite dashboard: run list, Findings/Diagnoses/Patches, Trust
-  Report, merge/reject). 21/21 unit tests pass; API, CLI, and dashboard were each also driven
-  for real against a live server (curl, CLI invocations, and a headless-Chromium screenshot of
-  the dashboard doing a scan), not just exercised through injected tests. Stopped after hitting
-  a push blocker (resolved in s2), not tokens.
-- 2026-09-26 s2 (s1's push and missing-CLAUDE.md blockers are resolved): rebuilt the Run Store and finished `@repro/api` / `@repro/cli` against the real
-  CLAUDE.md. Run Store: one `RunStore` interface (reads plus the orchestrator's writes), in-memory
-  and MongoDB implementations held to one shared conformance suite (the Mongo half runs against a
-  real mongod), both enforcing section 4's checkable semantics. API: `runs.summaries`/`detail`,
-  single-object gets, target validation matching lane 2's ingest, `/health` that pings the store
-  (503 when it can't), demo seed data (`REPRO_SEED_DEMO=1`, `npm run seed`). CLI: typed
-  `@trpc/client`, `repro status [--run <id>]`, `scan` (infers local vs GitHub, makes local paths
-  absolute, `--watch`), `watch` (exit 0 completed / 1 failed / 2 timeout, retries transient poll
-  failures). 112 tests green; also driven by hand against a live server on both stores.
-  Next: whichever lane owns the orchestrator wires it to `RunStore` (below).
+- 2026-09-26 s1: built `@repro/agents` (packages/agents): Gemini wrapper, secret-redacting workspace access, Diagnose (passes real-API integration), Repair loop, Challenger with counter-tests, gate, and the 2-attempt repair-and-verify loop; 71 unit tests green. Stopped at the usage limit.
+- 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Merged `lane-3` into main (PR #1, merge commit).
+- 2026-09-26 s3: contracts approved (section 4 as written; Lane 2's `@repro/contracts` follows it). Lane 3 doesn't merge `lane-2`; Lane 2 merges its own branch. Added Python-target coverage for test-command detection and secret extraction (74 unit tests). Next: when Lane 2's work reaches main, merge main into `lane-3`, swap `src/contracts.ts` for re-exports from `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
 
-## Blocked / needs a human
+- 2026-09-26 s4: reviewed Lane 4's PR #3 (merged by others despite the review) and Lane 2's PR #4; resolved #4's conflicts with #3 on `lane-2` (approved Zod contracts kept, committed node_modules/dist untracked, Lane 4's web/cli excluded from the root type-check) and merged it. `@repro/agents` now joins the npm workspace, re-exports `@repro/contracts`, extends `tsconfig.base.json`, and has `test/sandbox.int.ts` (Lane 2's ingest/detect/reproduce + DockerExecutor + real Gemini). Next: build the sandbox image and run `sandbox.int.ts`.
 
-- **Contracts package:** `packages/contracts` is still the verbatim mirror of lane 2's package
-  (the one lane 3's notes record as approved). Lane 1's own package (`lane-1`, 8b3b30d) differs:
-  no pending proof fields, `FindingSchema`-style names, zod 3, `Executor.run`. `@repro/api` and
-  `@repro/cli` import contract *types* only (`Run`, `Finding`, `Diagnosis`, `Patch`), so either
-  package works for them; only `test/seed.test.ts` uses lane 2's schema values (`Finding.parse`).
-  Pick one package before merging lanes to main.
-- **`patches.decide` / `repro patch` record a decision, they don't merge a PR.** Section 9 has a
-  human merge on GitHub; a Patch reaching `merged` should really come from the PR merging
-  (webhook), not a button. Keep as a fallback, rewire to GitHub, or drop?
+- 2026-09-26 s5: built the sandbox image and ran Lane 3 on the full real stack (`test/sandbox.int.ts`: Lane 2 detect/reproduce in Docker, real Gemini, counter-tests executed in the sandbox): verified end to end, and the fix holds on a fresh checkout. Fixes it forced: root `.gitattributes` keeping `sandbox/**` LF (CRLF shebangs made every reproduction command exit 127 on Windows), the Challenger now knows its evidence rule and is nudged toward a counter-test, and secrets Lane 2's patterns recognize are redacted even when no Finding flagged them (the planted key reached Gemini once because gitleaks missed it).
 
-## Handoff: how the orchestrator writes runs
+## Waiting
 
-- Nothing on this branch consumes queued Runs. The orchestrator can take the store from
-  `openRunStore()` (exported by `@repro/api`), poll `listRuns({ status: "queued" })`, and move
-  each Run with `updateRun`, `addFindings`, `recordReproduction`, `addDiagnoses`, `savePatch`.
-  Every write is checked (see `src/store/invariants.ts`), so a bad one throws a `StoreError`
-  (`NOT_FOUND` / `CONFLICT` / `INVALID`) instead of landing.
-- Mongo layout: collections `runs`, `findings`, `diagnoses`, `patches`; each document is the
-  contract plus `runId` (children only); unique index on `id`; reads project `_id`/`runId` away.
+- **Lane 1** has a third `@repro/contracts` (plus api/cli packages) on `lane-1`; it will hit the same add/add conflicts against main and needs reconciling with the approved package.
+- **Demo target:** Lane 2's real rules catch only the prompt logging in Lane 3's `demo-target`; the SQL injection (generic `db.query`, not `pg`) and the `sk-demo-…` key (gitleaks skips it) go undetected. The team's demo repo needs issues the real detectors catch, plus a test suite (no suite means nothing can be verified).
+- **Windows:** Lane 2's `repo-adapter.test.ts` symlink test fails on Windows (`C:/etc/hosts`), so the root `npm test` is red on this machine; reported in the PR #4 review.
 
-## Needs a contracts/spec decision
+## Contracts (approved 2026-09-26: section 4 as written)
 
-- `Run` has no failure reason: a failed Run shows only the stage it failed in.
-- `Run` has no field naming a GitHub PR (only `Patch.prUrl`), so `@repro/github`'s Check Run is
-  keyed to `(owner, repo, headSha)`.
-- Trust Report confidence is a simple point score (tests / no longer reproduces / Challenger
-  confirmed / no regressions); section 8 doesn't define a rubric.
-- A secret-removal Patch's literal `diff` still contains the removed line (lane 3's note); the
-  store saves diffs as given. Redacting at write time would break `git apply`.
+- `Executor` is `exec(request)`, as in Lane 2's package; Lane 3 uses it.
+- The pending proof fields are adopted as optional: Repair writes `reproductionOutputAfter` from the Executor, never from a model.
+- `Patch.challengerVerdict` has no "not yet challenged" value, so Repair emits `disputed` (fail closed) with notes "Not yet challenged." until the Challenger runs.
+- `Patch.diff` stays the literal `git diff`, so a secret-removal diff contains the removed line; Lane 3 redacts every diff it shows a model, and keeping it out of the Run Store is a storage-side concern (section 9).
+- `Workspace` has no test command: Repair takes one as input or detects it (`npm test`, `python -m pytest -q`). With no detectable suite, `testsPassed` is false and the gate can't verify, so demo repos need tests.
 
 ## Decisions (reversible calls, one line each)
 
-- The store refuses: reproductionOutput on an unconfirmed Finding; re-recording a reproduction;
-  a Diagnosis citing nothing or Findings of another Run; a `verified` Patch that fails the gate;
-  `merged` from anything but a decision; status moving backwards; any change to a final Run/Patch.
-- A Run's stage `done` and status `completed` are only valid together (stage = stage in flight).
-- IDs stay unique store-wide; writes are all-or-nothing per call; Mongo transitions are
-  conditional updates, so racing writers can't both win.
-- `runs.create` checks targets with lane 2's ingest grammar; local targets must be absolute at
-  the API, and the CLI makes them so. `repro scan` with no target scans the current directory.
-- The CLI uses `@trpc/client` typed against `AppRouter` (reverses s1's plain-fetch call), so API
-  drift is a compile error; `@repro/web` still uses plain fetch against unchanged procedures.
-- Demo data loads only on request; every seeded ID has `demo` in it and targets live under
-  `/demo/`. Its content follows lane 3's demo target and lane 2's `REPRODUCED ...` protocol.
-- Mongo tests use mongodb-memory-server (first run downloads mongod, ~120 MB);
-  `MONGODB_TEST_URI` points them at an existing server, `REPRO_SKIP_MONGO_TESTS=1` skips them.
-- `buildApp` logs nothing unless asked; `src/main.ts` is the server entrypoint (`npm run dev:api`).
-- IDs are `crypto.randomUUID()`, prefixed (`run_...`), matching lane 3's convention.
+- No root workspace/package.json: `packages/agents` is self-contained. Lane 2 has since scaffolded npm workspaces (`packages/*`) on `lane-2`; align to it once it's on main.
+- Real-API tests are named `*.int.ts` and run only via `npm run test:integration`, so the workspace root's `packages/*/test/**/*.test.ts` glob never makes paid calls.
+- Integration tests default `REPRO_MODEL_DIAGNOSE`/`REPRO_MODEL_CHALLENGER` to `gemini-3.8-flash` (free-tier keys get 0 Pro requests); set them to `gemini-3.1-pro-preview` on a billing-linked key. Code defaults stay per section 10.
+- The wrapper spends one plain request per interaction (dropped sockets retried). Background polling burned the daily quota, so it's opt-in via `REPRO_GEMINI_TRANSPORT=background` with 10s polls, for billing-linked keys.
+- Diagnose's `findingIds` enum is split into confirmed/unconfirmed variants, so no Diagnosis can mix them. The post-check also rejects double citations and flags uncovered Findings: one retry, keep the better attempt, drop and report the rest.
+- Prioritization is the order of returned Diagnoses; the Assurant plain-language consequence goes in `riskNotes`.
+- Secrets: gitleaks-flagged values are recovered using the redacted evidence as a template (matches Lane 2's gitleaks evidence format) and replaced by `[REDACTED-SECRET-n]` in everything shown to Gemini; edits restore the token on disk.
+- Repair: `finish` doesn't count against the 15-call cap; after 15 working calls, one grace turn accepts only `finish`. Every attempt starts with `git reset --hard headCommit`, via the Executor.
+- Reproduction re-runs: any non-zero exit or timeout counts as "still reproduces", matching Lane 2's protocol (1 = reproduced, 0 = not, else undecided), with undecided failing closed.
+- Regressions: detectors re-run on the patched tree; a Finding counts only if it's in a changed file, absent from the baseline, and not the cited rule (the reproduction re-run covers that).
+- Challenger: tool loop first, then one schema-only verdict call. "confirmed" stands only if at least one counter-test failed before and passes after, and no counter-test's latest run still fails after.
+- The verify→diagnose retry reuses the same Diagnosis with the failure as feedback (no re-diagnosis); counter-tests that broke attempt 1 are replayed against attempt 2.
+- IDs are `crypto.randomUUID()` (injectable).

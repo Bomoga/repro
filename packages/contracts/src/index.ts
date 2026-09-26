@@ -7,11 +7,6 @@
 //   - The two *pending* proof fields (Finding.reproductionOutput, Patch.reproductionOutputAfter)
 //     are adopted, as optional fields.
 //   - Executor, which section 4 names but never spells out, is one method: exec(ExecRequest).
-//
-// Mirrored verbatim into lane-4-fallback from origin/lane-2 (unmerged at mirror time) so
-// @repro/api and @repro/cli have a real, type-checked contract to build against instead of a
-// second, drifting guess. Delete this package and depend on the real one once lane-1/lane-2
-// lands @repro/contracts on main; nothing here should diverge from lane-2's copy in the meantime.
 import * as z from "zod";
 
 // ---------------------------------------------------------------------------------------------

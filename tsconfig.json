@@ -1,8 +1,14 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["packages/*/src", "packages/*/test", "vitest.config.ts"],
-  "exclude": ["packages/web"]
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "scripts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "packages/*/test/fixtures",
+    // Lane 4's web has its own tsconfig (JSX, DOM); the root build checks it separately.
+    "packages/web"
+  ]
 }

@@ -1,0 +1,3 @@
+rules/privacy-patterns/*.js
+rules/privacy-patterns/*.ts
+rules/privacy-patterns/*.py
