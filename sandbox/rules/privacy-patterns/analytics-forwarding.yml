@@ -1,0 +1,70 @@
+# privacy-patterns (Assurant, CLAUDE.md section 8). Note: semgrep metavariable-regex is anchored at
+# the start of the bound text, so "contains" checks are written as ".*(...)".
+#
+# Prompts leaving through an analytics or error-tracking SDK rather than a raw HTTP call: the
+# third-party-forwarding rules can't see these, since the SDK owns the endpoint.
+rules:
+  - id: privacy.analytics-forwarding.js
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Prompt or conversation content ($PROPS) is sent to an analytics or error-tracking service
+      as event data. Confirm users are told their conversations leave the tool, and what that
+      vendor retains.
+    metadata:
+      category: privacy
+      privacy-check: analytics-forwarding
+      cwe: ["CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $SDK.track($EVENT, $PROPS, ...)
+                  - pattern: $SDK.capture($EVENT, $PROPS, ...)
+                  - pattern: $SDK.logEvent($EVENT, $PROPS, ...)
+                  - pattern: '$SDK.track({..., properties: $PROPS, ...})'
+                  - pattern: '$SDK.capture({..., properties: $PROPS, ...})'
+              - metavariable-regex:
+                  metavariable: $SDK
+                  regex: (?i)((.*\.)?(ph|mp)|(.*\.)?\w*(analytics|mixpanel|posthog|amplitude|segment|rudderstack|heap|tracker)\w*)$
+          - patterns:
+              - pattern: Sentry.$METHOD(..., $PROPS, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: ^(setContext|setExtra|setExtras|captureMessage|addBreadcrumb)$
+      - metavariable-regex:
+          metavariable: $PROPS
+          regex: (?is)^(?!["'`])(?!.*(redact|mask|scrub|sanitiz|hash)).*(prompt|user_?input|messages|conversation|chat_?history|transcript|completion)
+
+  - id: privacy.analytics-forwarding.py
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Prompt or conversation content ($PROPS) is sent to an analytics or error-tracking service
+      as event data. Confirm users are told their conversations leave the tool, and what that
+      vendor retains.
+    metadata:
+      category: privacy
+      privacy-check: analytics-forwarding
+      cwe: ["CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $SDK.capture(..., properties=$PROPS, ...)
+                  - pattern: $SDK.track(..., properties=$PROPS, ...)
+                  - pattern: $SDK.capture($USER, $EVENT, $PROPS, ...)
+                  - pattern: $SDK.track($USER, $EVENT, $PROPS, ...)
+              - metavariable-regex:
+                  metavariable: $SDK
+                  regex: (?i)((.*\.)?(ph|mp)|(.*\.)?\w*(analytics|mixpanel|posthog|amplitude|segment|rudderstack|heap|tracker)\w*)$
+          - patterns:
+              - pattern: sentry_sdk.$METHOD(..., $PROPS, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: ^(set_context|set_extra|capture_message|add_breadcrumb)$
+      - metavariable-regex:
+          metavariable: $PROPS
+          regex: (?is)^(?!["'])(?!.*(redact|mask|scrub|sanitiz|hash)).*(prompt|user_?input|messages|conversation|chat_?history|transcript|completion)
