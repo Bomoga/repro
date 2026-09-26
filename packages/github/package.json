@@ -12,7 +12,7 @@
   "dependencies": {
     "@repro/api": "*",
     "@repro/contracts": "*",
-    "@repro/gemini": "*",
+    "@repro/agents": "*",
     "@octokit/rest": "^21.1.0"
   },
   "devDependencies": {

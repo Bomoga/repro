@@ -1,4 +1,4 @@
-import type { GeminiClient } from "@repro/gemini";
+import type { GeminiClient } from "@repro/agents";
 import type { Diagnosis, Finding, Patch } from "@repro/contracts";
 import type { TrustReport } from "@repro/api";
 

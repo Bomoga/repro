@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GeminiClient } from "@repro/gemini";
+import type { GeminiClient } from "@repro/agents";
 import type { Diagnosis, Finding, Patch } from "@repro/contracts";
 import { narratePrBody, templatedPrBody } from "../src/narrator.ts";
 import { buildTrustReport } from "@repro/api";
