@@ -28,7 +28,7 @@ await store.runs.setStage(run.id, "detect");
 
 // Detect, then the reproduction step
 await store.findings.insert(run.id, findings);
-await store.findings.markReproducible(findingId); // only after the Executor demonstrated the issue
+await store.findings.markReproducible(findingId, reproductionOutput); // only after the Executor demonstrated the issue
 
 // Diagnose, then Repair on what's eligible
 await store.diagnoses.insert(run.id, diagnoses); // refused if any citation isn't a Finding of this Run
@@ -67,21 +67,25 @@ const entries = await store.logs.list(run.id);
 | runs | `claimNextQueued()` | Atomic, so two orchestrators polling at once never claim the same Run |
 | runs | `setStage`, `setStatus`, `complete`, `fail` | Only while queued, running, or blocked; a finished Run never changes |
 | findings | `insert(runId, findings)`, `get`, `getMany`, `list(runId, filters)` | Filters: `reproducible`, `detectorId`, `severity`, `category`; file order |
-| findings | `markReproducible(id)`, `counts(runId)` | `counts` gives `{ total, reproducible }`, demo beat 2's two numbers |
+| findings | `markReproducible(id, reproductionOutput?)`, `counts(runId)` | The output is stored with the flip and never edited; `counts` gives `{ total, reproducible }`, demo beat 2's two numbers |
 | diagnoses | `insert(runId, diagnoses)`, `get`, `list`, `citing(findingId)`, `listRepairable(runId)` | |
 | patches | `insert(runId, patch)`, `get`, `list(runId, { status })`, `listByDiagnosis`, `listByStatus` | `listByStatus("verified")` is the merge queue |
-| patches | `transition(id, to)`, `setPrUrl(id, url)` | `gateFailures(patch)` and `PATCH_TRANSITIONS` are exported for reuse |
+| patches | `transition(id, to)`, `replace(runId, patch)`, `setPrUrl(id, url)` | `replace` refines a stored Patch (the Challenger's verdict, its notes) under the same status rules; `gateFailures(patch)` and `PATCH_TRANSITIONS` are exported for reuse |
 | run_logs | `append`, `list(runId)`, `writer(runId)` | |
 
 Batch inserts are idempotent: re-sending an object whose `id` is already stored for that Run leaves the stored one untouched and counts it in `alreadyPresent`, so an orchestrator retrying after a timeout can't undo a `reproducible` flip. Reusing an `id` under a different Run fails on the unique index.
 
 ### Lane 4's `RunStore` interface
 
-| Lane 4 (`packages/api/src/store.ts`) | `@repro/store` |
+The API's Mongo store (`packages/api/src/store/mongo.ts`) is Lane 4's `RunStore` over this package. It checks Lane 4's invariants first, the ones its in-memory store enforces too, then writes through these helpers. Reads with no helper here (paging with an offset, insertion order, per-Run tallies) use `store.models`.
+
+| Lane 4 (`packages/api/src/store/types.ts`) | `@repro/store` |
 |---|---|
-| `createRun`, `listRuns`, `getRun` | `runs.create`, `runs.list`, `runs.get` |
-| `listFindings`, `listDiagnoses`, `listPatches` | `findings.list`, `diagnoses.list`, `patches.list` |
-| `getPatch` | `patches.get` |
+| `createRun`, `insertRun`, `getRun` | `runs.create`, `runs.insert`, `runs.get` |
+| `updateRun(id, { stage, status })` | `runs.setStage`, `runs.setStatus`, `runs.complete`, `runs.fail` |
+| `addFindings`, `recordReproduction(id, output)`, `getFinding` | `findings.insert`, `findings.markReproducible`, `findings.get` |
+| `addDiagnoses`, `getDiagnosis` | `diagnoses.insert`, `diagnoses.get` |
+| `savePatch`, `listPatches`, `getPatch` | `patches.insert` or `patches.replace`, `patches.list`, `patches.get` |
 | `setPatchDecision(id, "merge" \| "reject")` | `patches.transition(id, "merged" \| "rejected")` |
 
 ## Connection patterns
