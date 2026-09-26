@@ -1,0 +1,20 @@
+{
+  "name": "@repro/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "repro": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@repro/contracts": "*",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "vitest": "^3.2.7"
+  }
+}
