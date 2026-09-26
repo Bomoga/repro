@@ -43,9 +43,14 @@ export async function detect(
       return;
     }
     for (const raw of outcome.value) {
+      const parsed = Finding.safeParse(raw);
+      if (!parsed.success) {
+        failures.push({ detectorId: adapter.id, message: `emitted an invalid Finding: ${parsed.error.message}` });
+        continue;
+      }
       // Enforced here as well as in each adapter: nothing leaves Detect already confirmed, and
       // only the reproduction step may write reproductionOutput.
-      const { reproductionOutput: _ignored, ...rest } = Finding.parse(raw);
+      const { reproductionOutput: _ignored, ...rest } = parsed.data;
       const finding: Finding = { ...rest, reproducible: false };
       if (finding.detectorId !== adapter.id) {
         failures.push({ detectorId: adapter.id, message: `emitted a Finding with detectorId ${finding.detectorId}` });

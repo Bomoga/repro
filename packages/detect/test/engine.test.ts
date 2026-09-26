@@ -52,4 +52,11 @@ describe("detect", () => {
     expect(r.findings).toEqual([]);
     expect(r.failures[0]!.message).toContain("detectorId semgrep");
   });
+
+  it("records an invalid Finding as that adapter's failure without losing the rest", async () => {
+    const bad = { ...base, id: "fnd_bad", severity: "urgent" } as unknown as Finding;
+    const r = await detect(seededWorkspace, exec, [adapter("fake", [bad, base])]);
+    expect(r.findings).toEqual([base]);
+    expect(r.failures[0]!.message).toContain("invalid Finding");
+  });
 });
