@@ -8,9 +8,7 @@
   ],
   "exclude": [
     "packages/*/test/fixtures",
-    // Lane 4 packages with their own tsconfig and build: web (JSX, `vite build`) and cli
-    // (`npm run build --workspace @repro/cli`).
-    "packages/web",
-    "packages/cli"
+    // Lane 4's web has its own tsconfig (JSX, DOM); the root build checks it separately.
+    "packages/web"
   ]
 }

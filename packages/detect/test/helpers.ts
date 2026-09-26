@@ -13,7 +13,16 @@ export function fixture(name: string): string {
 export const seededWorkspace: Workspace = {
   runId: "run-test",
   path: SEEDED,
-  fileIndex: ["app/jobs.py", "assistant/chat.ts", "assistant/memory.py", "server/config.js", "server/index.js"],
+  fileIndex: [
+    "app/jobs.py",
+    "assistant/chat.ts",
+    "assistant/memory.py",
+    "package-lock.json",
+    "package.json",
+    "requirements.txt",
+    "server/config.js",
+    "server/index.js",
+  ],
   languages: ["javascript", "python", "typescript"],
   headCommit: "0".repeat(40),
 };

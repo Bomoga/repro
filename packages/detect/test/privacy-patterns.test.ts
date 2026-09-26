@@ -3,7 +3,7 @@ import { privacyPatternsAdapter } from "../src/adapters/privacy-patterns.ts";
 import { FakeExecutor, fixture, seededWorkspace } from "./helpers.ts";
 
 describe("privacy-patterns adapter", () => {
-  it("reports the four privacy checks under its own detectorId", async () => {
+  it("reports each privacy check under its own detectorId", async () => {
     const exec = new FakeExecutor(() => ({ stdout: fixture("semgrep-privacy.json") }));
     const findings = await privacyPatternsAdapter.run(seededWorkspace, exec);
     expect(exec.requests[0]!.command).toContain("--config '/opt/repro/rules/privacy-patterns'");
@@ -12,6 +12,7 @@ describe("privacy-patterns adapter", () => {
       ["privacy.third-party-forwarding.js", "assistant/chat.ts", 6],
       ["privacy.unencrypted-conversation-storage.js", "assistant/chat.ts", 12],
       ["privacy.oauth-broad-scope.google.js", "assistant/chat.ts", 17],
+      ["privacy.analytics-forwarding.js", "assistant/chat.ts", 21],
       ["privacy.prompt-logging.py", "assistant/memory.py", 8],
       ["privacy.unencrypted-conversation-storage.py", "assistant/memory.py", 10],
     ]);
