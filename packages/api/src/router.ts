@@ -5,6 +5,7 @@ import { publicProcedure, router } from "./trpc.ts";
 import { checkHealth } from "./health.ts";
 import { MAX_TARGET_REF_LENGTH, targetProblem } from "./targets.ts";
 import { buildTrustReport } from "./trust.ts";
+import { buildReport } from "./report.ts";
 import type { RunCounts } from "./store/index.ts";
 
 // Section 8's no-chat-surface rule: the only inputs anywhere in this router are a target ref (to
@@ -141,6 +142,12 @@ export const appRouter = router({
     decide: publicProcedure
       .input(z.object({ patchId: Id, decision: z.enum(["merge", "reject"]) }))
       .mutation(({ ctx, input }) => ctx.store.setPatchDecision(input.patchId, input.decision)),
+  }),
+
+  report: publicProcedure.input(z.object({ runId: Id })).query(async ({ ctx, input }) => {
+    const run = await ctx.store.getRun(input.runId);
+    if (!run) throw notFound("run", input.runId);
+    return buildReport(ctx.store, input.runId);
   }),
 });
 

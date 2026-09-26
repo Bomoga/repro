@@ -1,4 +1,4 @@
-import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
+import type { Diagnosis, Finding, Patch, Run, RunReport } from "@repro/contracts";
 import type { TrustReport } from "@repro/api";
 
 // Same pattern as @repro/cli's client: a small typed wrapper over the tRPC HTTP endpoints, not
@@ -35,4 +35,5 @@ export const api = {
   listPatches: (runId: string) => query<Patch[]>("patches.list", { runId }),
   trustReport: (runId: string, patchId: string) => query<TrustReport>("patches.trustReport", { runId, patchId }),
   decidePatch: (patchId: string, decision: "merge" | "reject") => mutate<Patch>("patches.decide", { patchId, decision }),
+  report: (runId: string) => query<RunReport>("report", { runId }),
 };
