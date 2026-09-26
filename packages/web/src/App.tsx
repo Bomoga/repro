@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
+import type { Diagnosis, Finding, Patch, Run, RunReport } from "@repro/contracts";
 import type { TrustReport } from "@repro/api";
 import { api } from "./api.ts";
 
@@ -92,6 +92,8 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [patches, setPatches] = useState<Patch[]>([]);
   const [reports, setReports] = useState<Record<string, TrustReport>>({});
+  const [runReport, setRunReport] = useState<RunReport | null>(null);
+  const [expandedTab, setExpandedTab] = useState<"findings" | "patches" | "report">("report");
 
   useEffect(() => {
     api.listFindings(runId).then(setFindings);
@@ -101,6 +103,7 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
       const entries = await Promise.all(list.map(async (p) => [p.id, await api.trustReport(runId, p.id)] as const));
       setReports(Object.fromEntries(entries));
     });
+    api.report(runId).then(setRunReport).catch(() => {});
   }, [runId]);
 
   const decide = async (patchId: string, decision: "merge" | "reject") => {
@@ -110,9 +113,95 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
   };
 
   return (
-    <section>
-      <h2>Run {runId}</h2>
+    <div style={{ background: "#fff", border: "1px solid #e0e0e0", padding: "2rem", borderRadius: 0 }}>
+      <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1.5rem", textTransform: "uppercase", letterSpacing: "0.5px", color: "#666" }}>
+        Run Details: {runId.slice(0, 8)}...
+      </h2>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem", borderBottom: "1px solid #e0e0e0", paddingBottom: "1rem" }}>
+        <button
+          onClick={() => setExpandedTab("report")}
+          style={{
+            padding: "0.5rem 1rem",
+            background: expandedTab === "report" ? "#0066ff" : "transparent",
+            color: expandedTab === "report" ? "#fff" : "#666",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "0.9rem",
+            fontWeight: 600,
+            borderRadius: 0,
+          }}
+        >
+          📊 Report
+        </button>
+        <button
+          onClick={() => setExpandedTab("findings")}
+          style={{
+            padding: "0.5rem 1rem",
+            background: expandedTab === "findings" ? "#0066ff" : "transparent",
+            color: expandedTab === "findings" ? "#fff" : "#666",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "0.9rem",
+            fontWeight: 600,
+            borderRadius: 0,
+          }}
+        >
+          Findings ({findings.length})
+        </button>
+        <button
+          onClick={() => setExpandedTab("patches")}
+          style={{
+            padding: "0.5rem 1rem",
+            background: expandedTab === "patches" ? "#0066ff" : "transparent",
+            color: expandedTab === "patches" ? "#fff" : "#666",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "0.9rem",
+            fontWeight: 600,
+            borderRadius: 0,
+          }}
+        >
+          Patches ({patches.length})
+        </button>
+      </div>
+
+      {/* Report Tab */}
+      {expandedTab === "report" && runReport && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1.5rem", marginBottom: "2rem" }}>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Raw Findings</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#0066ff" }}>{runReport.stats.rawFindings}</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Reproduced</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#0066ff" }}>{runReport.stats.reproducedFindings}</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Patches Verified</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#00cc44" }}>{runReport.stats.patchesVerified}</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Success Rate</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#00cc44" }}>{(runReport.stats.successRate * 100).toFixed(1)}%</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Cost/Fix</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#0066ff" }}>${runReport.stats.estimatedCostPerFix.toFixed(2)}</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Regressions</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: runReport.stats.regressionsFound > 0 ? "#ff6600" : "#00cc44" }}>{runReport.stats.regressionsFound}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Findings Tab */}
+      {expandedTab === "findings" && (
+        <div>
       <h3>Findings ({findings.length})</h3>
       <ul>
         {findings.map((f) => (
@@ -121,16 +210,12 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
           </li>
         ))}
       </ul>
+        </div>
+      )}
 
-      <h3>Diagnoses ({diagnoses.length})</h3>
-      <ul>
-        {diagnoses.map((d) => (
-          <li key={d.id}>
-            <strong>{d.rootCause}</strong> — {d.proposedStrategy}
-          </li>
-        ))}
-      </ul>
-
+      {/* Patches Tab */}
+      {expandedTab === "patches" && (
+        <div>
       <h3>Patches ({patches.length})</h3>
       <ul>
         {patches.map((p) => {
@@ -160,6 +245,8 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
           );
         })}
       </ul>
-    </section>
+        </div>
+      )}
+    </div>
   );
 }
