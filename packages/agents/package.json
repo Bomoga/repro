@@ -4,17 +4,11 @@
   "private": true,
   "description": "Lane 3: Gemini-backed Diagnose, Repair, and Challenger stages for Repro",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
@@ -23,11 +17,12 @@
   },
   "dependencies": {
     "@google/genai": "^2.24.0",
+    "@repro/contracts": "*",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "@repro/detect": "*",
+    "@repro/executor": "*",
+    "@repro/ingest": "*"
   }
 }
