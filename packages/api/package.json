@@ -1,23 +1,28 @@
 {
   "name": "@repro/api",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
-    "test": "tsx --test src/**/*.test.ts"
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "seed": "tsx src/seed-main.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@repro/contracts": "*",
-    "fastify": "^5.3.0",
-    "zod": "^3.23.8"
+    "@trpc/server": "^11.0.0",
+    "fastify": "^5.2.0",
+    "@fastify/cors": "^10.0.1",
+    "mongoose": "^8.9.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "mongodb-memory-server": "^11.3.0",
+    "vitest": "^3.2.7"
   }
 }

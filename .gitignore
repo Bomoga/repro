@@ -1,4 +1,5 @@
 CLAUDE.md
+repro-developer-guide.md
 node_modules/
 dist/
 *.log
