@@ -12,12 +12,8 @@ import {
 } from "@repro/contracts";
 import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
 
-export { Diagnosis as DiagnosisSchema, Finding as FindingSchema, Patch as PatchSchema, Run as RunSchema };
-
-export type Finding = z.infer<typeof Finding>;
-export type Diagnosis = z.infer<typeof Diagnosis>;
-export type Patch = z.infer<typeof Patch>;
-export type Run = z.infer<typeof Run>;
+export { DiagnosisSchema, FindingSchema, PatchSchema, RunSchema };
+export type { Diagnosis, Finding, Patch, Run };
 
 export type Severity = Finding["severity"];
 export type PatchStatus = Patch["status"];
@@ -27,11 +23,11 @@ export type RunTarget = Run["target"];
 export type RunTrigger = Run["trigger"];
 
 export const ENUMS = {
-  severity: Finding.shape.severity.options,
-  challengerVerdict: Patch.shape.challengerVerdict.options,
-  patchStatus: Patch.shape.status.options,
-  runTrigger: Run.shape.trigger.options,
-  runTargetKind: Run.shape.target.shape.kind.options,
-  runStage: Run.shape.stage.options,
-  runStatus: Run.shape.status.options,
+  severity: FindingSchema.shape.severity.options,
+  challengerVerdict: PatchSchema.shape.challengerVerdict.options,
+  patchStatus: PatchSchema.shape.status.options,
+  runTrigger: RunSchema.shape.trigger.options,
+  runTargetKind: RunSchema.shape.target.shape.kind.options,
+  runStage: RunSchema.shape.stage.options,
+  runStatus: RunSchema.shape.status.options,
 } as const;
