@@ -281,6 +281,30 @@ describe("repro watch", () => {
   });
 });
 
+describe("repro report", () => {
+  it("reports on one run, or on every run as one JSON array", async () => {
+    const one = await repro(["report", "run_demo_completed"]);
+    expect(one.code).toBe(0);
+    expect(one.out[0]).toBe("Report: run_demo_completed");
+    expect(one.stdout).toContain("6 flagged, 4 reproduced, 2 cut as noise");
+
+    const all = await repro(["report", "--all", "--json"]);
+    expect(all.code).toBe(0);
+    const ids = (JSON.parse(all.stdout) as { runId: string }[]).map((report) => report.runId);
+    expect(ids.sort()).toEqual(["run_demo_completed", "run_demo_failed", "run_demo_queued", "run_demo_repairing"]);
+  });
+
+  it("needs a run ID or --all, and says when the run doesn't exist", async () => {
+    const bare = await repro(["report"]);
+    expect(bare.code).toBe(1);
+    expect(bare.err).toEqual(["error: which run? pass a run ID or --run <runId>, or --all"]);
+
+    const missing = await repro(["report", "run_nope"]);
+    expect(missing.code).toBe(1);
+    expect(missing.err.join("\n")).toContain("run not found: run_nope");
+  });
+});
+
 describe("repro patch", () => {
   it("records a merge on a verified patch and refuses an unverified one", async () => {
     const merged = await repro(["patch", "patch_demo_sqli_2", "merge"]);

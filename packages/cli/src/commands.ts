@@ -1,6 +1,7 @@
+import type { RunReport } from "@repro/api";
 import type { Run } from "@repro/contracts";
 import { apiErrorCode, describeError, isUnreachable, type ApiClient } from "./client.ts";
-import { formatDuration, painter, renderCompletion, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
+import { formatDuration, painter, renderCompletion, renderReport, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
 import { resolveScanTarget } from "./targets.ts";
 
 // The commands themselves, free of argv parsing and process globals: everything they touch comes
@@ -136,6 +137,38 @@ export async function decideCommand(ctx: CommandContext, patchId: string, decisi
   const patch = await ctx.client.patches.decide.mutate({ patchId, decision });
   ctx.out(`${patch.id} is now ${patch.status}`);
   return 0;
+}
+
+/** One run's report, or with `all` every run's, newest first. */
+export type ReportOptions = { runId: string; json?: boolean } | { all: true; json?: boolean };
+
+/** The API's page-size cap for runs.list. */
+const RUNS_PAGE = 200;
+
+export async function reportCommand(ctx: CommandContext, options: ReportOptions): Promise<number> {
+  const runIds = "runId" in options ? [options.runId] : await allRunIds(ctx);
+  const reports: RunReport[] = [];
+  for (const runId of runIds) reports.push(await ctx.client.report.query({ runId }));
+  if (options.json) {
+    printJson(ctx, "runId" in options ? reports[0] : reports);
+    return 0;
+  }
+  const paint = paintOf(ctx);
+  reports.forEach((report, i) => {
+    if (i > 0) ctx.out("");
+    for (const line of renderReport(report, paint)) ctx.out(line);
+  });
+  if (reports.length === 0) ctx.out(paint("dim", "No runs yet."));
+  return 0;
+}
+
+async function allRunIds(ctx: CommandContext): Promise<string[]> {
+  const ids: string[] = [];
+  for (let offset = 0; ; offset += RUNS_PAGE) {
+    const page = await ctx.client.runs.list.query({ limit: RUNS_PAGE, offset });
+    ids.push(...page.map((run) => run.id));
+    if (page.length < RUNS_PAGE) return ids;
+  }
 }
 
 /** Runs a command, turning any error into one readable line on stderr and exit code 1. */

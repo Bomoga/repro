@@ -1,5 +1,5 @@
 import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
-import type { RunDetail, RunSummary } from "@repro/api";
+import type { ReportedStage, RunDetail, RunReport, RunSummary } from "@repro/api";
 
 // Plain-text rendering for the terminal. Color is decided once by the caller (TTY, NO_COLOR) and
 // passed in, so tests read uncolored output.
@@ -162,4 +162,23 @@ export function renderCompletion(detail: RunDetail): string {
     `${run.id} ${run.status} at stage ${run.stage}: ${counts.findings} findings flagged, ${counts.reproducible} reproduced, ` +
     `${counts.verifiedPatches} of ${counts.patches} patches verified. Details: repro status --run ${run.id}`
   );
+}
+
+const REPORT_STAGES: ReportedStage[] = ["ingest", "detect", "diagnose", "repair", "verify"];
+
+export function renderReport(report: RunReport, paint: Paint): string[] {
+  const { stats } = report;
+  const stages = REPORT_STAGES.filter((stage) => stats.timePerStageMs[stage] !== undefined)
+    .map((stage) => `${stage} ${formatDuration(stats.timePerStageMs[stage]!)}`)
+    .join(", ");
+  const tokens = stats.geminiTokens;
+  return [
+    paint("bold", `Report: ${report.runId}`),
+    `  findings     ${stats.rawFindings} flagged, ${stats.reproducedFindings} reproduced, ${stats.noiseCut} cut as noise`,
+    `  repair       ${stats.findingsIntoRepair} findings in, ${stats.patchesAttempted} attempts, ${stats.challengerDisputes} disputed, ${stats.regressionsFound} regressions`,
+    `  fixed        ${stats.patchesVerified} verified, ${stats.patchesMerged} merged, ${(stats.successRate * 100).toFixed(0)}% of repaired diagnoses`,
+    `  gemini       ${tokens.input} input, ${tokens.output} output, ${tokens.thought} thought tokens` +
+      (stats.tokensPerFix === null ? "" : `; ${stats.tokensPerFix} per fix`),
+    `  duration     ${stats.totalDurationMs === null ? "not recorded" : formatDuration(stats.totalDurationMs)}${stages ? ` (${stages})` : ""}`,
+  ];
 }

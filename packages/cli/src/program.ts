@@ -1,6 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 import { createApiClient, DEFAULT_API_URL, type ApiClient } from "./client.ts";
-import { decideCommand, guarded, scanCommand, statusCommand, watchCommand, type CommandContext } from "./commands.ts";
+import { decideCommand, guarded, reportCommand, scanCommand, statusCommand, watchCommand, type CommandContext } from "./commands.ts";
 
 // `repro`: the status surface's CLI (CLAUDE.md section 7). Its only inputs are a target ref, IDs,
 // and flags, never free text (section 8's no-chat-surface rule).
@@ -114,6 +114,23 @@ export async function runCli(argv: string[], environment: CliEnvironment): Promi
         throw new UsageError(`two different runs given: ${positional} and --run ${opts.run}`);
       }
       await run((ctx) => watchCommand(ctx, runId, { intervalMs: opts.interval, timeoutMs: opts.timeout, json: opts.json }));
+    });
+
+  program
+    .command("report")
+    .description("Show what a run found, reproduced, and fixed, and the time and Gemini tokens it took")
+    .argument("[runId]", "run to report on (same as --run)")
+    .option("--run <runId>", "run to report on")
+    .option("--all", "report on every run, newest first")
+    .option("--json", "print JSON instead of text")
+    .action(async (positional: string | undefined, opts: { run?: string; all?: boolean; json?: boolean }) => {
+      if (positional && opts.run && positional !== opts.run) {
+        throw new UsageError(`two different runs given: ${positional} and --run ${opts.run}`);
+      }
+      const runId = opts.run ?? positional;
+      if (runId && opts.all) throw new UsageError("pass a run ID or --all, not both");
+      if (!runId && !opts.all) throw new UsageError("which run? pass a run ID or --run <runId>, or --all");
+      await run((ctx) => reportCommand(ctx, runId ? { runId, json: opts.json } : { all: true, json: opts.json }));
     });
 
   program
