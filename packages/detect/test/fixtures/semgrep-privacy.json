@@ -121,6 +121,36 @@
    }
   },
   {
+   "check_id": "opt.repro.rules.privacy-patterns.privacy.analytics-forwarding.js",
+   "path": "assistant/chat.ts",
+   "start": {
+    "line": 21,
+    "col": 3,
+    "offset": 580
+   },
+   "end": {
+    "line": 21,
+    "col": 67,
+    "offset": 644
+   },
+   "extra": {
+    "message": "Prompt or conversation content ({ prompt, model: \"gemini\" }) is sent to an analytics or error-tracking service as event data. Confirm users are told their conversations leave the tool, and what that vendor retains.",
+    "metadata": {
+     "category": "privacy",
+     "privacy-check": "analytics-forwarding",
+     "cwe": [
+      "CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"
+     ],
+     "confidence": "MEDIUM"
+    },
+    "severity": "ERROR",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
    "check_id": "opt.repro.rules.privacy-patterns.privacy.prompt-logging.py",
    "path": "assistant/memory.py",
    "start": {
