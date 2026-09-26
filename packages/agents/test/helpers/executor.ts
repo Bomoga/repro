@@ -161,6 +161,22 @@ export function counterTestOracle(request: ExecRequest): ExecResult | undefined 
   return result(1, "", "counterTestOracle: no CHECKS marker in this test");
 }
 
+/**
+ * Integration-test stand-in for running a real model's counter-test, whose code can only be
+ * judged by executing it (which never happens on the host). It answers what a competent
+ * injection test would observe: pass when both queries bind their caller-supplied value, fail
+ * otherwise. The test file itself is never read or run.
+ */
+export function simulatedInjectionCounterTest(request: ExecRequest): ExecResult | undefined {
+  if (request.command.trim() === "npm test") return undefined;
+  if (!/^(node(\s+--test)?|npm\s+(run\s+)?test\s+--)\s+\S+/.test(request.command.trim())) return undefined;
+  const db = read(request.workspacePath, "src/db.js");
+  const bound = passedAsParameter(db, "findNotesByOwner", "ownerId") && passedAsParameter(db, "getNoteById", "noteId");
+  return bound
+    ? result(0, "✔ caller input is passed as a bound parameter\n# tests 1\n# pass 1\n# fail 0")
+    : result(1, "✖ caller input reached the SQL text\n  AssertionError: expected the value in params, found it in the query string\n# tests 1\n# pass 0\n# fail 1");
+}
+
 export function demoTargetHandlers(secret: string): CommandHandler[] {
   return [
     on(/^npm test$/, demoTargetTests),
