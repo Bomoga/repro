@@ -56,11 +56,23 @@ describe.skipIf(!ready)("lane 3 on the real sandbox and the real Gemini API", ()
     for (const diagnosis of eligible) {
       const result = await repairAndVerify({ diagnosis, findings, workspace }, { gemini, executor: exec, detectors: [] });
       results.push({ ...result, findingIds: diagnosis.findingIds });
-      console.log(
-        `\n=== [${diagnosis.findingIds.join(", ")}] -> ${result.patch.status} after ${result.attempts.length} attempt(s)\n` +
-          `${result.patch.challengerNotes}\n${result.patch.diff}`,
-      );
+      console.log(`\n=== [${diagnosis.findingIds.join(", ")}] -> ${result.patch.status} after ${result.attempts.length} attempt(s)`);
+      for (const [i, attempt] of result.attempts.entries()) {
+        console.log(`--- attempt ${i + 1}: repair ${attempt.repair.stopReason}, patch ${attempt.patch.status}`);
+        for (const call of attempt.repair.toolCalls) console.log(`    repair ${call.ok ? "ok  " : "FAIL"} ${call.name}: ${call.summary}`);
+        for (const run of attempt.challenge?.counterTests ?? []) {
+          console.log(`    counter-test ${run.test.path} [${run.test.command}] ${run.before.status}->${run.after.status}: ${run.outcome}`);
+        }
+        console.log(`    challenger said ${attempt.challenge?.modelVerdict ?? "(not run)"}`);
+      }
+      console.log(`${result.patch.challengerNotes}\n${result.patch.diff}`);
       expect(PatchSchema.parse(result.patch)).toEqual(result.patch);
+    }
+    // Challenger tool calls that errored never become counter-test runs; show them.
+    for (const entry of log.entries.filter((e) => e.role === "challenger" && Array.isArray(e.request.input))) {
+      for (const item of entry.request.input as { type: string; name?: string; isError?: boolean; result?: string }[]) {
+        if (item.type === "function_result" && item.isError) console.log(`    challenger ${item.name} error: ${item.result?.slice(0, 200)}`);
+      }
     }
     expect(results.some((r) => r.patch.status === "verified")).toBe(true);
     for (const entry of log.entries) expect(JSON.stringify(entry.request)).not.toContain(PLANTED_SECRET);
