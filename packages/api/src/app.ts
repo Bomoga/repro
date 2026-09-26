@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { appRouter } from "./router.ts";
 import type { Context } from "./trpc.ts";
-import type { RunStore } from "./store.ts";
+import type { RunStore } from "./store/index.ts";
 
 export function buildApp(store: RunStore): FastifyInstance {
   const app = Fastify({ logger: true });

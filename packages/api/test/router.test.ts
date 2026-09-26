@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { buildApp } from "../src/app.ts";
-import { InMemoryRunStore } from "../src/store.ts";
+import { InMemoryRunStore } from "../src/store/index.ts";
 import type { Diagnosis, Finding, Patch } from "@repro/contracts";
 
 const finding: Finding = {
@@ -42,22 +42,20 @@ const patch: Patch = {
   status: "verified",
 };
 
-function seededStore(): InMemoryRunStore {
+async function seededStore(): Promise<InMemoryRunStore> {
   const store = new InMemoryRunStore();
-  store.seed({
-    run: {
-      id: "run_1",
-      trigger: "manual",
-      target: { kind: "github", ref: "main" },
-      stage: "verify",
-      status: "blocked",
-      startedAt: new Date().toISOString(),
-      logRef: "log_1",
-    },
-    findings: [finding],
-    diagnoses: [diagnosis],
-    patches: [patch],
+  await store.insertRun({
+    id: "run_1",
+    trigger: "manual",
+    target: { kind: "github", ref: "octo/example" },
+    stage: "verify",
+    status: "blocked",
+    startedAt: new Date().toISOString(),
+    logRef: "run_logs/run_1",
   });
+  await store.addFindings("run_1", [finding]);
+  await store.addDiagnoses("run_1", [diagnosis]);
+  await store.savePatch("run_1", patch);
   return store;
 }
 
@@ -70,7 +68,7 @@ describe("api", () => {
   });
 
   it("lists runs via tRPC", async () => {
-    const app = buildApp(seededStore());
+    const app = buildApp(await seededStore());
     const res = await app.inject({ method: "GET", url: "/trpc/runs.list" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -79,7 +77,7 @@ describe("api", () => {
   });
 
   it("gets a run's findings, diagnoses, and patches", async () => {
-    const app = buildApp(seededStore());
+    const app = buildApp(await seededStore());
     const input = encodeURIComponent(JSON.stringify({ runId: "run_1" }));
 
     const findingsRes = await app.inject({ method: "GET", url: `/trpc/findings.list?input=${input}` });
@@ -99,8 +97,8 @@ describe("api", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("merges a verified patch and rejects deciding twice", async () => {
-    const app = buildApp(seededStore());
+  it("merges a verified patch and refuses deciding twice with 409", async () => {
+    const app = buildApp(await seededStore());
     const merge = await app.inject({
       method: "POST",
       url: "/trpc/patches.decide",
@@ -114,7 +112,7 @@ describe("api", () => {
       url: "/trpc/patches.decide",
       payload: { patchId: "patch_1", decision: "reject" },
     });
-    expect(again.statusCode).toBe(400);
+    expect(again.statusCode).toBe(409);
   });
 
   it("creates a run from a target ref only", async () => {

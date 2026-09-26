@@ -1,7 +1,6 @@
 import * as z from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "./trpc.ts";
-import { InvalidPatchDecisionError, PatchNotFoundError } from "./store.ts";
 import { buildTrustReport } from "./trust.ts";
 
 // Section 8: only inputs the status surface accepts are a target ref (to start a Run) and
@@ -65,15 +64,7 @@ export const appRouter = router({
     // a verified Patch. Everything else in the Patch lifecycle is written by Verify.
     decide: publicProcedure
       .input(z.object({ patchId: z.string(), decision: z.enum(["merge", "reject"]) }))
-      .mutation(async ({ ctx, input }) => {
-        try {
-          return await ctx.store.setPatchDecision(input.patchId, input.decision);
-        } catch (error) {
-          if (error instanceof PatchNotFoundError) throw new TRPCError({ code: "NOT_FOUND", message: error.message });
-          if (error instanceof InvalidPatchDecisionError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
-          throw error;
-        }
-      }),
+      .mutation(({ ctx, input }) => ctx.store.setPatchDecision(input.patchId, input.decision)),
   }),
 });
 

@@ -1,21 +1,14 @@
 import { buildApp } from "./app.ts";
-import { InMemoryRunStore, type RunStore } from "./store.ts";
-import { connectMongoStore } from "./mongo-store.ts";
+import { openRunStore } from "./store/index.ts";
 
 export { buildApp } from "./app.ts";
-export { InMemoryRunStore, type RunStore } from "./store.ts";
+export * from "./store/index.ts";
 export { appRouter, type AppRouter } from "./router.ts";
 export type { Context } from "./trpc.ts";
 export { buildTrustReport, type TrustReport } from "./trust.ts";
 
-async function resolveStore(): Promise<RunStore> {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) return new InMemoryRunStore();
-  return connectMongoStore(uri);
-}
-
 async function main(): Promise<void> {
-  const store = await resolveStore();
+  const store = await openRunStore();
   const app = buildApp(store);
   const port = Number(process.env.PORT ?? 4000);
   const host = process.env.HOST ?? "0.0.0.0";
