@@ -331,7 +331,9 @@ function toResponse(raw: unknown, requestedModel: string): InteractResponse {
     .filter((step) => step?.type === "function_call")
     .map((step) => ({
       id: String(step.id ?? ""),
-      name: String(step.name ?? ""),
+      // Gemini sometimes names a call with the namespace it files declared tools under
+      // ("default_api:read_file"); every tool here is declared without one.
+      name: String(step.name ?? "").replace(/^default_api[:.]/, ""),
       arguments: isRecord(step.arguments) ? step.arguments : {},
     }));
   const usage = r.usage;
