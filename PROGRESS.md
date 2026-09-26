@@ -8,10 +8,12 @@ One line per session: what was done, what's next.
 
 - 2026-09-26 s4: reviewed Lane 4's PR #3 (merged by others despite the review) and Lane 2's PR #4; resolved #4's conflicts with #3 on `lane-2` (approved Zod contracts kept, committed node_modules/dist untracked, Lane 4's web/cli excluded from the root type-check) and merged it. `@repro/agents` now joins the npm workspace, re-exports `@repro/contracts`, extends `tsconfig.base.json`, and has `test/sandbox.int.ts` (Lane 2's ingest/detect/reproduce + DockerExecutor + real Gemini). Next: build the sandbox image and run `sandbox.int.ts`.
 
+- 2026-09-26 s5: built the sandbox image and ran Lane 3 on the full real stack (`test/sandbox.int.ts`: Lane 2 detect/reproduce in Docker, real Gemini, counter-tests executed in the sandbox): verified end to end, and the fix holds on a fresh checkout. Fixes it forced: root `.gitattributes` keeping `sandbox/**` LF (CRLF shebangs made every reproduction command exit 127 on Windows), the Challenger now knows its evidence rule and is nudged toward a counter-test, and secrets Lane 2's patterns recognize are redacted even when no Finding flagged them (the planted key reached Gemini once because gitleaks missed it).
+
 ## Waiting
 
-- **Real sandbox run:** `test/sandbox.int.ts` skips until Docker Desktop is running and `npm run sandbox:build` has built `repro-sandbox:dev` (the build downloads base images, Semgrep, and rule packs).
 - **Lane 1** has a third `@repro/contracts` (plus api/cli packages) on `lane-1`; it will hit the same add/add conflicts against main and needs reconciling with the approved package.
+- **Demo target:** Lane 2's real rules catch only the prompt logging in Lane 3's `demo-target`; the SQL injection (generic `db.query`, not `pg`) and the `sk-demo-…` key (gitleaks skips it) go undetected. The team's demo repo needs issues the real detectors catch, plus a test suite (no suite means nothing can be verified).
 - **Windows:** Lane 2's `repo-adapter.test.ts` symlink test fails on Windows (`C:/etc/hosts`), so the root `npm test` is red on this machine; reported in the PR #4 review.
 
 ## Contracts (approved 2026-09-26: section 4 as written)

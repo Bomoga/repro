@@ -4,9 +4,13 @@
  * Finding's evidence, but the file around it still holds the real value, so every view of
  * workspace text handed to Gemini (file contents, diffs, command output) goes through
  * `redact`, and every edit Gemini makes goes through `restore` before it touches disk.
+ * Secrets come from two places: the run's secret Findings, and Lane 2's secret patterns
+ * (`redactSecrets`) applied to every text on its way to a model, which catches what a detector
+ * missed.
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { redactSecrets } from "@repro/detect";
 import type { Finding, Workspace } from "./contracts.js";
 
 export class WorkspacePathError extends Error {
@@ -78,6 +82,31 @@ export function extractSecrets(line: string, evidence: string): string[] | undef
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const KEY_BLOCK_START = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const KEY_BLOCK_END = /-----END [A-Z ]*PRIVATE KEY-----/;
+
+/**
+ * Registers every secret Lane 2's pattern list recognizes in `text`: the exact value when the
+ * redacted line can serve as a template, the whole line otherwise, and every line of a private
+ * key block.
+ */
+export function learnPatternSecrets(text: string, redactor: SecretRedactor): void {
+  let inKeyBlock = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (KEY_BLOCK_START.test(line)) inKeyBlock = true;
+    if (inKeyBlock) {
+      redactor.add(line.trim(), "LINE");
+      if (KEY_BLOCK_END.test(line)) inKeyBlock = false;
+      continue;
+    }
+    const redacted = redactSecrets(line);
+    if (redacted === line) continue;
+    const secrets = extractSecrets(line, redacted);
+    if (secrets) for (const secret of secrets) redactor.add(secret, "SECRET");
+    else redactor.add(line.trim(), "LINE");
+  }
 }
 
 export interface ReplaceResult {
@@ -177,6 +206,7 @@ export class WorkspaceFiles {
     }
     const raw = await fs.readFile(absolute, "utf8");
     if (raw.includes("\u0000")) return "[binary file omitted]";
+    learnPatternSecrets(raw, this.redactor);
     return this.redactor.redact(raw.replace(/\r\n/g, "\n"));
   }
 
@@ -189,6 +219,7 @@ export class WorkspaceFiles {
     const absolute = await this.resolve(file);
     const raw = await fs.readFile(absolute, "utf8");
     const crlf = raw.includes("\r\n");
+    learnPatternSecrets(raw, this.redactor);
     const view = this.redactor.redact(raw.replace(/\r\n/g, "\n"));
     const oldNormalized = oldText.replace(/\r\n/g, "\n");
     if (oldNormalized === "") return { ok: false, message: "old_text must not be empty" };
@@ -206,8 +237,10 @@ export class WorkspaceFiles {
     return { ok: true, message: `replaced 1 occurrence in ${this.normalize(file)}` };
   }
 
-  /** Redacts known secrets from arbitrary text bound for a model (diffs, command output). */
+  /** Redacts secrets from arbitrary text bound for a model (diffs, command output), including
+   *  any the text itself reveals to Lane 2's patterns. */
   redact(text: string): string {
+    learnPatternSecrets(text, this.redactor);
     return this.redactor.redact(text);
   }
 }

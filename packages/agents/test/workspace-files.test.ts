@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SecretRedactor, WorkspaceFiles, WorkspacePathError, extractSecrets } from "../src/workspace-files.js";
+import { SecretRedactor, WorkspaceFiles, WorkspacePathError, extractSecrets, learnPatternSecrets } from "../src/workspace-files.js";
 import { FIXTURE_FINDINGS, HARDCODED_KEY, PLANTED_SECRET } from "./fixtures/findings.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
@@ -78,6 +78,26 @@ describe("WorkspaceFiles", () => {
     expect(result.ok).toBe(true);
     expect(onDisk("src/config.js")).not.toContain(PLANTED_SECRET);
     expect(onDisk("src/config.js")).toContain("OPENAI_API_KEY: process.env.OPENAI_API_KEY,");
+  });
+
+  it("redacts a secret no detector flagged, using Lane 2's secret patterns", async () => {
+    // The real sandbox run: gitleaks missed this key, so no Finding pointed at it.
+    const unflagged = await WorkspaceFiles.open(fixture.workspace, []);
+    const view = await unflagged.readView("src/config.js");
+    expect(view).not.toContain(PLANTED_SECRET);
+    expect(view).toMatch(/OPENAI_API_KEY: '\[REDACTED-SECRET-\d+\]'/);
+    expect(unflagged.redact(`-  OPENAI_API_KEY: '${PLANTED_SECRET}',`)).not.toContain(PLANTED_SECRET);
+
+    const edit = await unflagged.replaceInView("src/config.js", "model: 'demo-chat-1'", "model: 'demo-chat-2'");
+    expect(edit.ok).toBe(true);
+    expect(onDisk("src/config.js")).toContain(`OPENAI_API_KEY: '${PLANTED_SECRET}'`);
+  });
+
+  it("withholds every line of a private key block", async () => {
+    const redactor = new SecretRedactor();
+    const block = ["-----BEGIN RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw", "-----END RSA PRIVATE KEY-----"];
+    learnPatternSecrets(["const key = `", ...block, "`;"].join("\n"), redactor);
+    expect(redactor.redact(block.join("\n"))).not.toContain("MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw");
   });
 
   it("withholds the whole line when the evidence can't locate the secret", async () => {

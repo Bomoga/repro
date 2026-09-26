@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { InputItem } from "../src/gemini.js";
 import { repair, type RepairResult } from "../src/repair/repair.js";
 import { challenge } from "../src/verify/challenger.js";
+import { NO_COUNTER_TEST_NUDGE } from "../src/verify/prompt.js";
 import type { CounterTest } from "../src/verify/counter-tests.js";
 import { SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
@@ -95,10 +96,25 @@ describe("challenge", () => {
 
   it("won't confirm on opinion alone: some attack has to fail before and pass after", async () => {
     const repaired = await propose(SOUND_FIX);
-    const { promise } = run(repaired, [[], verdict("confirmed", "Looks right to me.")]);
+    const { scripted, promise } = run(repaired, [[], [], verdict("confirmed", "Looks right to me.")]);
     const result = await promise;
+    expect(scripted.requests[1]!.input).toEqual([{ type: "text", text: NO_COUNTER_TEST_NUDGE }]);
     expect(result.patch.challengerVerdict).toBe("disputed");
     expect(result.patch.challengerNotes).toMatch(/without a counter-test/);
+  });
+
+  it("nudges once toward a counter-test, then accepts one that fails before and passes after", async () => {
+    const repaired = await propose(SOUND_FIX);
+    const { scripted, promise } = run(repaired, [
+      [],
+      [{ name: "run_counter_test", args: counterTest("numeric-injection") }],
+      [],
+      verdict("confirmed"),
+    ]);
+    const result = await promise;
+    expect(scripted.requests.filter((r) => JSON.stringify(r.input).includes("You haven't run a counter-test"))).toHaveLength(1);
+    expect(result.counterTests.map((r) => r.outcome)).toEqual(["fix-holds"]);
+    expect(result.patch.status).toBe("verified");
   });
 
   it("counts only the latest run of each path, so a broken test can be fixed and re-run", async () => {
@@ -132,7 +148,7 @@ describe("challenge", () => {
   it("keeps counter-tests out of tracked files, .git, and anywhere outside the workspace", async () => {
     const repaired = await propose(SOUND_FIX);
     const at = (file: string) => ({ name: "run_counter_test", args: { ...counterTest("numeric-injection"), path: file } });
-    const { scripted, promise } = run(repaired, [[at("src/db.js"), at("../escape.test.js"), at(".git/hooks/pre-commit")], [], verdict("disputed")]);
+    const { scripted, promise } = run(repaired, [[at("src/db.js"), at("../escape.test.js"), at(".git/hooks/pre-commit")], [], [], verdict("disputed")]);
     const result = await promise;
     const results = scripted.requests[1]!.input as InputItem[];
     expect(results.slice(0, 3).map((r) => r.type === "function_result" && r.isError)).toEqual([true, true, true]);
