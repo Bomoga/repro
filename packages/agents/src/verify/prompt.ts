@@ -1,7 +1,7 @@
 import type { Diagnosis, Finding, Patch } from "../contracts.js";
 import { fence } from "../diagnose/prompt.js";
 import { excerpt } from "../sandbox.js";
-import type { CounterTestRun } from "./counter-tests.js";
+import { missingModule, type CounterTestRun } from "./counter-tests.js";
 
 export const CHALLENGER_SYSTEM_PROMPT = `You are the Challenger in Repro's verification gate. A separate repair agent changed the code to fix the findings below. Your only job is to prove that patch wrong. You didn't write it and have no stake in it passing.
 
@@ -99,9 +99,16 @@ export function renderRuns(runs: CounterTestRun[], redact: (text: string) => str
 export function renderRun(run: CounterTestRun, redact: (text: string) => string): string {
   const output = (result: CounterTestRun["before"]["result"]) =>
     redact(excerpt([result.stdout.trimEnd(), result.stderr.trimEnd()].filter(Boolean).join("\n"), 1_500));
+  const missing = run.outcome === "inconclusive" ? missingModule(run.before.result) : undefined;
   return [
     `${run.test.path}: ${OUTCOME_TEXT[run.outcome]}`,
     `  ${run.test.description}`,
+    ...(missing
+      ? [
+          `  note: both runs failed to load '${missing}', which isn't installed here: the sandbox has no network. ` +
+            "Test the logic without it: require only the modules that hold the code under test, or stub the package in the test file.",
+        ]
+      : []),
     `  before (original commit): ${run.before.status.toUpperCase()} (exit ${run.before.result.exitCode})`,
     fence(output(run.before.result)),
     `  after (patched tree): ${run.after.status.toUpperCase()} (exit ${run.after.result.exitCode})`,

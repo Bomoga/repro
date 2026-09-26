@@ -41,6 +41,24 @@ export function runStatus(result: ExecResult): RunStatus {
   return "fail";
 }
 
+/** The module or package a run failed to load, from Node's or Python's error, if that's why it failed. */
+export function missingModule(result: ExecResult): string | undefined {
+  const match = /Cannot find (?:module|package) '([^']+)'|No module named '([^']+)'/.exec(`${result.stdout}\n${result.stderr}`);
+  return match ? (match[1] ?? match[2]) : undefined;
+}
+
+/**
+ * A counter-test run's outcome from both results. When both runs fail to load the same module, the
+ * test never reached the code on either tree (typically a package the sandbox can't install, having
+ * no network), so it says nothing about the patch.
+ */
+export function outcomeOfRun(before: ExecResult, after: ExecResult): CounterTestOutcome {
+  const [beforeStatus, afterStatus] = [runStatus(before), runStatus(after)];
+  const missing = missingModule(before);
+  if (beforeStatus === "fail" && afterStatus === "fail" && missing !== undefined && missing === missingModule(after)) return "inconclusive";
+  return outcomeOf(beforeStatus, afterStatus);
+}
+
 export function outcomeOf(before: RunStatus, after: RunStatus): CounterTestOutcome {
   if (before === "error" || after === "error") return "inconclusive";
   const passedBefore = before === "pass";
@@ -97,13 +115,11 @@ export class CounterTestRunner {
 
     await fs.rm(target, { force: true });
     await this.restorePatched();
-    const beforeStatus = runStatus(before);
-    const afterStatus = runStatus(after);
     return {
       test,
-      before: { status: beforeStatus, result: before },
-      after: { status: afterStatus, result: after },
-      outcome: outcomeOf(beforeStatus, afterStatus),
+      before: { status: runStatus(before), result: before },
+      after: { status: runStatus(after), result: after },
+      outcome: outcomeOfRun(before, after),
     };
   }
 
