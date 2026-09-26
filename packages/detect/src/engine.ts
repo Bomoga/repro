@@ -1,5 +1,6 @@
 import { type DetectorAdapter, type Executor, Finding, type Workspace } from "@repro/contracts";
 import { gitleaksAdapter } from "./adapters/gitleaks.ts";
+import { osvAdapter } from "./adapters/osv.ts";
 import { privacyPatternsAdapter } from "./adapters/privacy-patterns.ts";
 import { semgrepAdapter } from "./adapters/semgrep.ts";
 
@@ -19,7 +20,7 @@ export interface DetectResult {
 }
 
 export function defaultAdapters(): DetectorAdapter[] {
-  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter];
+  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter, osvAdapter];
 }
 
 // The Deterministic Detection Engine: runs every enabled adapter, nothing else. No model calls,

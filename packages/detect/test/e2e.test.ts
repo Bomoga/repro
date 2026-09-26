@@ -44,6 +44,10 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
     expect(byDetector("semgrep")).toBe(4);
     expect(byDetector("gitleaks")).toBe(1);
     expect(byDetector("privacy-patterns")).toBe(6);
+    // Advisory counts depend on the image's OSV snapshot, so pin the two seeded ones, not a total.
+    expect(findings.filter((f) => f.detectorId === "osv-scanner").map((f) => `${f.file}:${f.ruleId}`)).toEqual(
+      expect.arrayContaining(["package-lock.json:GHSA-xvch-5gv4-984h", "requirements.txt:GHSA-8q59-q68h-6hv4"]),
+    );
     expect(findings.every((f) => f.reproducible === false && f.reproductionOutput === undefined)).toBe(true);
   }, 300_000);
 
@@ -63,6 +67,21 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
     expect(leak.evidence).toContain("REDACTED");
     expect(leak.reproductionOutput).toContain("REDACTED");
   });
+
+  it("reports a dependency advisory fixed once the pin is upgraded", async () => {
+    const pyyaml = findings.find((f) => f.ruleId === "GHSA-8q59-q68h-6hv4")!;
+    expect(pyyaml.reproductionOutput).toContain("osv database snapshot:");
+    const file = join(workspace.path, pyyaml.file);
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file, before.replace("PyYAML==5.3.1", "PyYAML==5.4"));
+    try {
+      const after = await exec.exec({ workspacePath: workspace.path, command: pyyaml.reproductionCommand!, timeoutMs: 120_000 });
+      expect(after.exitCode).toBe(0);
+      expect(after.stdout).toContain("NOT REPRODUCED");
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 120_000);
 
   it("gives Repair a reproductionCommand that reports the fix once the code changes", async () => {
     const shell = findings.find((f) => f.ruleId.endsWith("subprocess-shell-true"))!;
