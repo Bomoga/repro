@@ -157,7 +157,7 @@ describe("repro scan", () => {
 
   it("keeps a revision on a local path and infers GitHub refs", async () => {
     const local = await repro(["scan", ".#main"]);
-    expect(local.out[0]).toMatch(new RegExp(`for local:${workdir}#main$`));
+    expect(local.out[0]).toMatch(new RegExp(`for local:${workdir.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")}#main$`));
     const gh = await repro(["scan", "octo/example#v2"]);
     expect(gh.code).toBe(0);
     expect(gh.out[0]).toMatch(/for github:octo\/example#v2$/);
