@@ -59,6 +59,7 @@ const findingFields: SchemaDefinition = {
   evidence: String,
   reproducible: Boolean,
   reproductionCommand: String,
+  reproductionOutput: String,
   createdAt: String,
 };
 
@@ -126,6 +127,7 @@ export const patchSchema = defineSchema(
     filesChanged: [String],
     testsPassed: Boolean,
     originalFindingReproduces: Boolean,
+    reproductionOutputAfter: String,
     regressionFindings: [embeddedFindingSchema],
     challengerVerdict: { type: String, enum: ENUMS.challengerVerdict },
     challengerNotes: String,
