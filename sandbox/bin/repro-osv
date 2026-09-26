@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""Known-vulnerable dependency versions, from osv-scanner against an offline OSV database.
+
+Usage:
+  repro-osv scan <lockfile>...                  JSON list of findings on stdout
+  repro-osv check <lockfile> <package> <vuln>   reproductionCommand for one finding
+
+The database is a snapshot baked into the image at build time (/opt/repro/osv, date in
+/opt/repro/osv/SNAPSHOT), and osv-scanner always runs --offline: no transitive resolution
+through deps.dev, no network, so the same lockfile and image always give the same answer.
+
+Only exact versions count. A lockfile entry is exact by construction; a requirements file line
+counts only when pinned with == (or ===), because "flask>=2.0" says nothing about which version
+is installed and osv-scanner's offline mode would otherwise report 2.0's advisories for it.
+
+`check` follows the same protocol as repro-semgrep-rule and repro-gitleaks-rule:
+  exit 1  "REPRODUCED ..." line(s)     the vulnerable version is still in the lockfile
+  exit 0  "NOT REPRODUCED ..." line    it isn't (upgraded, removed, or lockfile gone)
+  exit 2  reason on stderr             could not decide
+Both modes locate lines with the same function, so check's "at <file>:<line>-" always matches
+the Finding that scan produced at the same commit.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+SNAPSHOT_FILE = "/opt/repro/osv/SNAPSHOT"
+REQUIREMENTS = re.compile(r"^requirements[\w.-]*\.txt$|\.requirements\.txt$|^constraints[\w.-]*\.txt$")
+PIN = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*===?\s*([^\s;#,\\]+)")
+SEVERITY_BY_LABEL = {"LOW": "low", "MODERATE": "medium", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
+
+
+def fail(msg: str) -> None:
+    print(f"repro-osv: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def norm_name(name: str, ecosystem: str) -> str:
+    # PEP 503 normalization for Python; npm names are case-sensitive and compared as-is.
+    return re.sub(r"[-_.]+", "-", name).lower() if ecosystem == "PyPI" else name
+
+
+def norm_version(version: str) -> str:
+    v = version.strip().lstrip("vV=")
+    while v.endswith(".0") and v.count(".") > 0:
+        v = v[:-2]
+    return v
+
+
+def is_requirements(path: str) -> bool:
+    return bool(REQUIREMENTS.search(os.path.basename(path)))
+
+
+def locate(path: str, name: str, version: str, ecosystem: str):
+    """(lineStart, lineEnd) of the entry pinning name@version, or None if the file doesn't pin it
+    exactly. None means "not a grounded finding", not "couldn't find it"."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return None
+    base = os.path.basename(path)
+    want_name = norm_name(name, ecosystem)
+    want_version = norm_version(version)
+
+    def version_after(i: int, pattern: str, window: int):
+        rx = re.compile(pattern)
+        for j in range(i + 1, min(i + 1 + window, len(lines))):
+            m = rx.search(lines[j])
+            if m and norm_version(m.group(1)) == want_version:
+                return j
+        return None
+
+    if is_requirements(path):
+        for i, line in enumerate(lines):
+            m = PIN.match(line)
+            if m and norm_name(m.group(1), "PyPI") == want_name and norm_version(m.group(2)) == want_version:
+                return (i + 1, i + 1)
+        return None
+
+    if base in ("package-lock.json", "npm-shrinkwrap.json"):
+        # v2/v3: "node_modules/<name>": {  (possibly nested)  |  v1: "<name>": {
+        header = re.compile(r'^\s*"(?:(?:[^"]*/)?node_modules/)?' + re.escape(name) + r'"\s*:\s*\{')
+        for i, line in enumerate(lines):
+            if header.match(line):
+                j = version_after(i, r'"version"\s*:\s*"([^"]+)"', 6)
+                if j is not None:
+                    return (i + 1, j + 1)
+        return None
+
+    if base == "yarn.lock":
+        header = re.compile(r'^"?' + re.escape(name) + r"@")
+        for i, line in enumerate(lines):
+            if header.match(line) or re.search(r',\s*"?' + re.escape(name) + r"@", line) and line.rstrip().endswith(":"):
+                j = version_after(i, r'^\s+version:?\s+"?([^"\s]+)"?', 4)
+                if j is not None:
+                    return (i + 1, j + 1)
+        return None
+
+    if base == "pnpm-lock.yaml":
+        for i, line in enumerate(lines):
+            if re.search(r"(^|[\s/'\"])" + re.escape(name) + r"[@/]" + re.escape(version) + r"(?=[:(_'\"\s]|$)", line):
+                return (i + 1, i + 1)
+        return None
+
+    if base in ("poetry.lock", "pdm.lock", "uv.lock"):
+        for i, line in enumerate(lines):
+            m = re.match(r'^\s*name\s*=\s*"([^"]+)"', line)
+            if m and norm_name(m.group(1), "PyPI") == want_name:
+                j = version_after(i, r'^\s*version\s*=\s*"([^"]+)"', 3)
+                if j is not None:
+                    return (i + 1, j + 1)
+        return None
+
+    if base == "Pipfile.lock":
+        header = re.compile(r'^\s*"([^"]+)"\s*:\s*\{')
+        for i, line in enumerate(lines):
+            m = header.match(line)
+            if m and norm_name(m.group(1), "PyPI") == want_name:
+                j = version_after(i, r'"version"\s*:\s*"=*([^"]+)"', 12)
+                if j is not None:
+                    return (i + 1, j + 1)
+        return None
+
+    return None
+
+
+def lockfile_arg(path: str) -> str:
+    # osv-scanner only recognizes the exact name requirements.txt; name the parser for variants.
+    return f"requirements.txt:{path}" if is_requirements(path) else path
+
+
+def fixed_versions(vulns, name: str, ecosystem: str):
+    fixed = []
+    for v in vulns:
+        for aff in v.get("affected", []):
+            pkg = aff.get("package", {})
+            if pkg.get("ecosystem") != ecosystem or norm_name(pkg.get("name", ""), ecosystem) != norm_name(name, ecosystem):
+                continue
+            for rng in aff.get("ranges", []):
+                for ev in rng.get("events", []):
+                    if "fixed" in ev and ev["fixed"] not in fixed:
+                        fixed.append(ev["fixed"])
+    return fixed[:3]
+
+
+def severity(group, vulns) -> str:
+    score = group.get("max_severity") or ""
+    try:
+        s = float(score)
+        # CVSS v3 qualitative ratings.
+        return "critical" if s >= 9.0 else "high" if s >= 7.0 else "medium" if s >= 4.0 else "low" if s > 0 else "info"
+    except ValueError:
+        pass
+    for v in vulns:
+        label = str(v.get("database_specific", {}).get("severity", "")).upper()
+        if label in SEVERITY_BY_LABEL:
+            return SEVERITY_BY_LABEL[label]
+    # No score anywhere in the advisory: a known vulnerability with unknown impact.
+    return "medium"
+
+
+def scan(lockfiles):
+    for path in lockfiles:
+        if ":" in path or path.startswith("-"):
+            fail(f"refusing lockfile path {path!r}")
+    cmd = ["osv-scanner", "scan", "source", "--offline", "--offline-vulnerabilities", "--format", "json", "--verbosity", "error"]
+    for path in lockfiles:
+        cmd += ["--lockfile", lockfile_arg(path)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # 0: no vulnerabilities, 1: vulnerabilities found, 128: no packages found. Anything else is
+    # osv-scanner failing, which must not read as "clean".
+    if proc.returncode == 128:
+        return []
+    if proc.returncode not in (0, 1):
+        fail(f"osv-scanner exited {proc.returncode}: {proc.stderr[-2000:]}")
+    try:
+        report = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        fail(f"osv-scanner produced no JSON report: {proc.stderr[-2000:]}")
+
+    cwd = os.getcwd() + os.sep
+    findings = []
+    for result in report.get("results") or []:
+        path = result["source"]["path"]
+        rel = path[len(cwd):] if path.startswith(cwd) else path
+        for pkg in result.get("packages") or []:
+            meta = pkg["package"]
+            name, version, ecosystem = meta["name"], meta.get("version", ""), meta.get("ecosystem", "")
+            where = locate(rel, name, version, ecosystem)
+            if where is None:
+                continue
+            by_id = {v["id"]: v for v in pkg.get("vulnerabilities") or []}
+            for group in pkg.get("groups") or []:
+                ids = group.get("ids") or []
+                if not ids:
+                    continue
+                vulns = [by_id[i] for i in ids if i in by_id]
+                aliases = sorted(set(ids) | set(group.get("aliases") or []) | {a for v in vulns for a in v.get("aliases", [])})
+                primary = next((i for i in ids if i.startswith("GHSA-")), ids[0])
+                cve = next((a for a in aliases if a.startswith("CVE-")), None)
+                lead = by_id.get(primary) or (vulns[0] if vulns else {})
+                summary = lead.get("summary") or (lead.get("details") or "").strip().split("\n")[0]
+                findings.append({
+                    "file": rel,
+                    "ecosystem": ecosystem,
+                    "package": name,
+                    "version": version,
+                    "id": primary,
+                    "aliases": aliases,
+                    "cve": cve,
+                    "summary": " ".join(summary.split())[:300],
+                    "severity": severity(group, vulns),
+                    "fixed": fixed_versions(vulns, name, ecosystem),
+                    "lineStart": where[0],
+                    "lineEnd": where[1],
+                })
+    return findings
+
+
+def snapshot() -> str:
+    try:
+        with open(SNAPSHOT_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return "unknown"
+
+
+def check(lockfile: str, package: str, vuln: str) -> None:
+    if not os.path.isfile(lockfile):
+        print(f"NOT REPRODUCED osv {vuln} in {lockfile}: file no longer exists")
+        sys.exit(0)
+    hits = []
+    for f in scan([lockfile]):
+        same_pkg = norm_name(f["package"], f["ecosystem"]) == norm_name(package, f["ecosystem"])
+        if same_pkg and (f["id"] == vuln or vuln in f["aliases"]):
+            hits.append(f)
+    for f in hits:
+        also = f" ({f['cve']})" if f["cve"] and f["cve"] != vuln else ""
+        fix = f"; fixed in {', '.join(f['fixed'])}" if f["fixed"] else ""
+        print(
+            f"REPRODUCED osv {vuln} at {f['file']}:{f['lineStart']}-{f['lineEnd']}: "
+            f"{f['package']}@{f['version']} is affected{also}{fix}"
+        )
+    print(f"osv database snapshot: {snapshot()}")
+    if hits:
+        sys.exit(1)
+    print(f"NOT REPRODUCED osv {vuln} for {package} in {lockfile}")
+    sys.exit(0)
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if len(args) >= 2 and args[0] == "scan":
+        print(json.dumps(scan(args[1:])))
+    elif len(args) == 4 and args[0] == "check":
+        check(*args[1:])
+    else:
+        fail("usage: repro-osv scan <lockfile>... | repro-osv check <lockfile> <package> <vuln-id>")
+
+
+if __name__ == "__main__":
+    main()
