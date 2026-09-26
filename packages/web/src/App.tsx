@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Diagnosis, Finding, Patch, Run, RunReport } from "@repro/contracts";
-import type { TrustReport } from "@repro/api";
+import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
+import type { RunReport, TrustReport } from "@repro/api";
 import { api } from "./api.ts";
 
 // Section 8: only inputs are a target ref (to start a Run) and merge/reject on a Patch --
@@ -93,9 +93,21 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
   const [patches, setPatches] = useState<Patch[]>([]);
   const [reports, setReports] = useState<Record<string, TrustReport>>({});
   const [runReport, setRunReport] = useState<RunReport | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [expandedTab, setExpandedTab] = useState<"findings" | "diagnoses" | "patches" | "report">("report");
 
+  const loadReport = () =>
+    api.report(runId).then(
+      (report) => {
+        setRunReport(report);
+        setReportError(null);
+      },
+      (error: unknown) => setReportError(error instanceof Error ? error.message : String(error)),
+    );
+
   useEffect(() => {
+    setRunReport(null);
+    setReportError(null);
     api.listFindings(runId).then(setFindings);
     api.listDiagnoses(runId).then(setDiagnoses);
     api.listPatches(runId).then(async (list) => {
@@ -103,12 +115,13 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
       const entries = await Promise.all(list.map(async (p) => [p.id, await api.trustReport(runId, p.id)] as const));
       setReports(Object.fromEntries(entries));
     });
-    api.report(runId).then(setRunReport).catch(() => {});
+    void loadReport();
   }, [runId]);
 
   const decide = async (patchId: string, decision: "merge" | "reject") => {
     await api.decidePatch(patchId, decision);
     setPatches(await api.listPatches(runId));
+    void loadReport();
     onDecided();
   };
 
@@ -183,6 +196,9 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
       </div>
 
       {/* Report Tab */}
+      {expandedTab === "report" && !runReport && (
+        <p style={{ color: reportError ? "#cc3300" : "#666" }}>{reportError ? `Couldn't load the report: ${reportError}` : "Loading report…"}</p>
+      )}
       {expandedTab === "report" && runReport && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1.5rem", marginBottom: "2rem" }}>
@@ -203,8 +219,8 @@ function RunDetail({ runId, onDecided }: { runId: string; onDecided: () => void 
               <div style={{ fontSize: "2rem", fontWeight: 700, color: "#00cc44" }}>{(runReport.stats.successRate * 100).toFixed(1)}%</div>
             </div>
             <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
-              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Cost/Fix</div>
-              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#0066ff" }}>${runReport.stats.estimatedCostPerFix.toFixed(2)}</div>
+              <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Gemini Tokens/Fix</div>
+              <div style={{ fontSize: "2rem", fontWeight: 700, color: "#0066ff" }}>{runReport.stats.tokensPerFix === null ? "—" : runReport.stats.tokensPerFix.toLocaleString()}</div>
             </div>
             <div style={{ textAlign: "center", padding: "1rem", background: "#f9f9f9", border: "1px solid #e0e0e0" }}>
               <div style={{ fontSize: "0.75rem", color: "#999", textTransform: "uppercase", marginBottom: "0.5rem" }}>Regressions</div>

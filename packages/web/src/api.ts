@@ -1,5 +1,5 @@
-import type { Diagnosis, Finding, Patch, Run, RunReport } from "@repro/contracts";
-import type { TrustReport } from "@repro/api";
+import type { Diagnosis, Finding, Patch, Run } from "@repro/contracts";
+import type { RunReport, TrustReport } from "@repro/api";
 
 // Same pattern as @repro/cli's client: a small typed wrapper over the tRPC HTTP endpoints, not
 // a full @trpc/client, since the dashboard only ever calls these fixed procedures. Requests go

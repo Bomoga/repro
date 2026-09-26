@@ -1,6 +1,7 @@
-import type { Run, RunReport } from "@repro/contracts";
+import type { RunReport } from "@repro/api";
+import type { Run } from "@repro/contracts";
 import { apiErrorCode, describeError, isUnreachable, type ApiClient } from "./client.ts";
-import { formatDuration, painter, renderCompletion, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
+import { formatDuration, painter, renderCompletion, renderReport, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
 import { resolveScanTarget } from "./targets.ts";
 
 // The commands themselves, free of argv parsing and process globals: everything they touch comes
@@ -138,62 +139,35 @@ export async function decideCommand(ctx: CommandContext, patchId: string, decisi
   return 0;
 }
 
-export interface ReportOptions {
-  runId?: string;
-  all?: boolean;
-  json?: boolean;
-}
+/** One run's report, or with `all` every run's, newest first. */
+export type ReportOptions = { runId: string; json?: boolean } | { all: true; json?: boolean };
+
+/** The API's page-size cap for runs.list. */
+const RUNS_PAGE = 200;
 
 export async function reportCommand(ctx: CommandContext, options: ReportOptions): Promise<number> {
-  const paint = paintOf(ctx);
-  try {
-    if (options.all) {
-      const runs = await ctx.client.runs.list.query({});
-      ctx.out(paint("dim", `# Reports for ${runs.length} run(s)\n`));
-      for (const run of runs) {
-        const report = await ctx.client.report.query({ runId: run.id });
-        if (options.json) {
-          printJson(ctx, report);
-        } else {
-          ctx.out(paint("bold", `Run: ${run.id}`));
-          ctx.out(`  Findings: ${report.stats.rawFindings} (${report.stats.reproducedFindings} reproduced, ${report.stats.noiseCut} noise)`);
-          ctx.out(`  Patches: ${report.stats.patchesAttempted} attempted, ${report.stats.patchesVerified} verified, ${report.stats.patchesMerged} merged`);
-          ctx.out(`  Success: ${(report.stats.successRate * 100).toFixed(1)}%`);
-          ctx.out(`  Cost per fix: $${report.stats.estimatedCostPerFix.toFixed(3)}`);
-          ctx.out("");
-        }
-      }
-    } else if (options.runId) {
-      const report = await ctx.client.report.query({ runId: options.runId });
-      if (options.json) {
-        printJson(ctx, report);
-      } else {
-        ctx.out(paint("bold", `Report: ${options.runId}`));
-        ctx.out(`Generated: ${report.generatedAt}`);
-        ctx.out("");
-        ctx.out(paint("bold", "Stats:"));
-        ctx.out(`  Raw findings: ${report.stats.rawFindings}`);
-        ctx.out(`  Reproduced: ${report.stats.reproducedFindings}`);
-        ctx.out(`  Noise cut: ${report.stats.noiseCut}`);
-        ctx.out(`  Into repair: ${report.stats.findingsIntoRepair}`);
-        ctx.out(`  Patches verified: ${report.stats.patchesVerified}/${report.stats.patchesAttempted}`);
-        ctx.out(`  Success rate: ${(report.stats.successRate * 100).toFixed(1)}%`);
-        ctx.out(`  Regressions: ${report.stats.regressionsFound}`);
-        ctx.out(`  Disputes: ${report.stats.challengerDisputes}`);
-        ctx.out(`  Cost per fix: $${report.stats.estimatedCostPerFix.toFixed(3)}`);
-        ctx.out(`  Duration: ${formatDuration(report.stats.totalDurationMs)}`);
-      }
-    } else {
-      ctx.err("error: provide --all or --runId <id>");
-      return 1;
-    }
+  const runIds = "runId" in options ? [options.runId] : await allRunIds(ctx);
+  const reports: RunReport[] = [];
+  for (const runId of runIds) reports.push(await ctx.client.report.query({ runId }));
+  if (options.json) {
+    printJson(ctx, "runId" in options ? reports[0] : reports);
     return 0;
-  } catch (error) {
-    if ((error as any)?.code === "NOT_FOUND") {
-      ctx.err(`error: run not found`);
-      return 1;
-    }
-    throw error;
+  }
+  const paint = paintOf(ctx);
+  reports.forEach((report, i) => {
+    if (i > 0) ctx.out("");
+    for (const line of renderReport(report, paint)) ctx.out(line);
+  });
+  if (reports.length === 0) ctx.out(paint("dim", "No runs yet."));
+  return 0;
+}
+
+async function allRunIds(ctx: CommandContext): Promise<string[]> {
+  const ids: string[] = [];
+  for (let offset = 0; ; offset += RUNS_PAGE) {
+    const page = await ctx.client.runs.list.query({ limit: RUNS_PAGE, offset });
+    ids.push(...page.map((run) => run.id));
+    if (page.length < RUNS_PAGE) return ids;
   }
 }
 
