@@ -3,18 +3,20 @@
 One line per session: what was done, what's next.
 
 - 2026-09-26 s1: built `@repro/agents` (packages/agents): Gemini wrapper, secret-redacting workspace access, Diagnose (passes real-API integration), Repair loop, Challenger with counter-tests, gate, and the 2-attempt repair-and-verify loop; 71 unit tests green. Stopped at the usage limit.
-- 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Merged `lane-3` into main (PR #1, merge commit). Next: once Lane 2's work is on main, merge main into `lane-3`, swap `src/contracts.ts` for `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
+- 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Merged `lane-3` into main (PR #1, merge commit).
+- 2026-09-26 s3: contracts approved (section 4 as written; Lane 2's `@repro/contracts` follows it). Lane 3 doesn't merge `lane-2`; Lane 2 merges its own branch. Added Python-target coverage for test-command detection and secret extraction (74 unit tests). Next: when Lane 2's work reaches main, merge main into `lane-3`, swap `src/contracts.ts` for re-exports from `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
 
-## Blocked
+## Waiting on Lane 2 (not Lane 3's to merge)
 
-- **Real sandbox (needs Lane 2 on main, then Docker):** counter-tests and tests only get truly judged by executing them in Lane 2's DockerExecutor (`packages/executor` on `lane-2`, image built from `sandbox/Dockerfile`). Until then, integration tests answer commands with oracles and never execute model code on the host. The Docker daemon isn't running on this machine and the image hasn't been built (the build downloads base images, Semgrep, and rule packs).
+- **`@repro/contracts` and the real sandbox** are on `lane-2` only. Once Lane 2 merges them into main: swap the local contracts mirror for the package and run the integration tests through `DockerExecutor` (Docker Desktop running, image built from `sandbox/Dockerfile`; the build downloads base images, Semgrep, and rule packs). Until then, integration tests answer commands with oracles and never execute model code on the host.
 
-## Needs a contracts decision
+## Contracts (approved 2026-09-26: section 4 as written)
 
-- `Executor`'s shape: section 4 doesn't define it. Lane 2's contracts package (on `lane-2`) chose `exec(request)`; Lane 3 now uses the same.
-- `Patch.challengerVerdict` is required but has no "not yet challenged" value; Repair sets `disputed` (fail closed) with notes "Not yet challenged." A `pending` value would be clearer.
-- A secret-removal Patch's `diff` (literal `git diff`) contains the removed secret line, which conflicts with section 9's "never in the Run Store". Lane 3 redacts every diff it shows Gemini, but the stored diff is literal.
-- `Workspace` has no test command; Repair detects one (`npm test` / `python -m pytest -q`) or takes it as input.
+- `Executor` is `exec(request)`, as in Lane 2's package; Lane 3 uses it.
+- The pending proof fields are adopted as optional: Repair writes `reproductionOutputAfter` from the Executor, never from a model.
+- `Patch.challengerVerdict` has no "not yet challenged" value, so Repair emits `disputed` (fail closed) with notes "Not yet challenged." until the Challenger runs.
+- `Patch.diff` stays the literal `git diff`, so a secret-removal diff contains the removed line; Lane 3 redacts every diff it shows a model, and keeping it out of the Run Store is a storage-side concern (section 9).
+- `Workspace` has no test command: Repair takes one as input or detects it (`npm test`, `python -m pytest -q`). With no detectable suite, `testsPassed` is false and the gate can't verify, so demo repos need tests.
 
 ## Decisions (reversible calls, one line each)
 
