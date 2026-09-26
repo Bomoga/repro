@@ -20,6 +20,7 @@ import {
   type NewRun,
   type PatchDecision,
   type RunCounts,
+  type RunLogRecord,
   type RunQuery,
   type RunStore,
   type RunUpdate,
@@ -241,6 +242,19 @@ export class MongoRunStore implements RunStore {
     if (!current) throw notFound("patch", patchId);
     const next = decidedPatch(current, decision);
     return write(this.store.patches.transition(patchId, next.status));
+  }
+
+  async claimNextQueued(): Promise<Run | null> {
+    return this.store.runs.claimNextQueued();
+  }
+
+  async appendLog(runId: string, kind: string, entry: unknown, at?: string): Promise<void> {
+    await this.requireRun(runId);
+    await this.store.logs.append(runId, kind, entry, at);
+  }
+
+  async listLogs(runId: string, query: { kind?: string } = {}): Promise<RunLogRecord[]> {
+    return this.store.logs.list(runId, { kind: query.kind, limit: 10_000 });
   }
 
   async ping(): Promise<void> {

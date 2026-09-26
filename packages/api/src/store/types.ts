@@ -44,6 +44,14 @@ export interface RunCounts {
 
 export type PatchDecision = "merge" | "reject";
 
+/** One entry of a Run's retained prompt and tool-call log (section 9). */
+export interface RunLogRecord {
+  at: string;
+  /** What wrote it: "gemini" for a model interaction, "orchestrator" for a pipeline event. */
+  kind: string;
+  entry: unknown;
+}
+
 export const DEFAULT_RUN_LIMIT = 50;
 
 export type StoreErrorCode = "NOT_FOUND" | "CONFLICT" | "INVALID";
@@ -91,6 +99,15 @@ export interface RunStore {
   savePatch(runId: string, patch: Patch): Promise<Patch>;
   /** A person's merge/reject on a verified Patch: the only way a Patch reaches "merged". */
   setPatchDecision(patchId: string, decision: PatchDecision): Promise<Patch>;
+
+  // Orchestrator ------------------------------------------------------------------------------
+  /** The work queue: moves the oldest queued Run to running and returns it, atomically, so two
+   *  orchestrators polling at once never take the same Run. Null when nothing is queued. */
+  claimNextQueued(): Promise<Run | null>;
+  /** Appends to a Run's retained prompt and tool-call log (section 9). */
+  appendLog(runId: string, kind: string, entry: unknown, at?: string): Promise<void>;
+  /** A Run's log, in write order. */
+  listLogs(runId: string, query?: { kind?: string }): Promise<RunLogRecord[]>;
 
   // Lifecycle --------------------------------------------------------------------------------
   /** Resolves when the backing store is reachable; rejects otherwise. */
