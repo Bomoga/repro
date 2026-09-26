@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "dev": "npm run dev --workspace @repro/api",
     "dev:api": "npm run dev -w @repro/api",
+    "control-plane": "npm run start --workspace @repro/orchestrator",
     "status": "npm run status --workspace @repro/cli",
     "cli": "node packages/cli/bin/repro.js",
     "seed": "npm run seed -w @repro/api",
