@@ -91,7 +91,7 @@ One shared cluster is the Run Store for the whole team (section 10). Lane 1 sets
    ```
 
 6. **Hand it out** by direct message or a password manager, per the rules above.
-7. **Check it**, which also builds the indexes from `packages/contracts/README.md`:
+7. **Check it**, which also builds the indexes listed in `packages/store/README.md`:
 
    ```sh
    npm run check -w @repro/store

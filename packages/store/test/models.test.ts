@@ -33,7 +33,7 @@ const sorted = (values: readonly string[]) => [...values].sort();
 
 describe("Mongoose schemas mirror the contracts exactly", () => {
   // If one of these fails, a contract gained or lost a field: update src/models.ts to match, and
-  // the collection table in packages/contracts/README.md with it.
+  // the collection table in README.md with it.
   it.each([
     ["runs", runSchema, RunSchema, []],
     ["findings", findingSchema, FindingSchema, ["runId"]],
