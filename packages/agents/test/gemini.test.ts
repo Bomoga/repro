@@ -116,6 +116,19 @@ describe("createGeminiClient", () => {
     });
   });
 
+  it("drops the default_api namespace Gemini sometimes puts on a call's name", async () => {
+    const { sdk } = fakeSdk({
+      id: "int-3",
+      status: "requires_action",
+      steps: [
+        { type: "function_call", id: "call-1", name: "default_api:rerun_detector", arguments: {} },
+        { type: "function_call", id: "call-2", name: "default_api.run_tests", arguments: {} },
+      ],
+    });
+    const response = await createGeminiClient({ sdk, env: {} }).interact({ role: "repair", systemInstruction: "s", input: "i" });
+    expect(response.functionCalls.map((call) => call.name)).toEqual(["rerun_detector", "run_tests"]);
+  });
+
   it("retries 429 and 5xx with backoff and logs every attempt", async () => {
     const { sdk } = fakeSdk(httpError(429, "Resource exhausted, please retry in 1.5s"), httpError(503, "unavailable"), completed);
     const log = new MemoryInteractionLog();

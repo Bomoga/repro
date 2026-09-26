@@ -267,6 +267,46 @@ export function describeRunStore(name: string, open: () => Promise<RunStore>): v
       });
     });
 
+    describe("orchestrator queue and run logs", () => {
+      it("claims the oldest queued run, moving it to running, until none is left", async () => {
+        const newer = aRun({ stage: "ingest", status: "queued", startedAt: "2026-09-26T10:00:00.000Z" });
+        const older = aRun({ stage: "ingest", status: "queued", startedAt: "2026-09-26T09:00:00.000Z" });
+        await store.insertRun(aRun({ startedAt: "2026-09-26T08:00:00.000Z" }));
+        for (const run of [newer, older]) await store.insertRun(run);
+
+        expect(await store.claimNextQueued()).toEqual({ ...older, status: "running" });
+        expect(await store.getRun(older.id)).toEqual({ ...older, status: "running" });
+        expect(await store.claimNextQueued()).toEqual({ ...newer, status: "running" });
+        expect(await store.claimNextQueued()).toBeNull();
+      });
+
+      it("hands each queued run to exactly one of several claims made at once", async () => {
+        for (let i = 0; i < 3; i++) await store.insertRun(aRun({ stage: "ingest", status: "queued" }));
+        const claimed = await Promise.all(Array.from({ length: 5 }, () => store.claimNextQueued()));
+        const ids = claimed.flatMap((run) => (run ? [run.id] : []));
+        expect(ids).toHaveLength(3);
+        expect(new Set(ids).size).toBe(3);
+      });
+
+      it("keeps each run's log in write order, filtered by kind", async () => {
+        const run = await store.insertRun(aRun());
+        const other = await store.insertRun(aRun());
+        const interaction = { role: "diagnose", request: { input: "findings..." }, response: { outputText: "{}" } };
+        await store.appendLog(run.id, "orchestrator", { stage: "detect", findings: 3 }, "2026-09-26T10:00:00.000Z");
+        await store.appendLog(run.id, "gemini", interaction, "2026-09-26T10:00:01.000Z");
+        await store.appendLog(other.id, "orchestrator", { stage: "ingest" });
+
+        expect(await store.listLogs(run.id)).toEqual([
+          { at: "2026-09-26T10:00:00.000Z", kind: "orchestrator", entry: { stage: "detect", findings: 3 } },
+          { at: "2026-09-26T10:00:01.000Z", kind: "gemini", entry: interaction },
+        ]);
+        expect(await store.listLogs(run.id, { kind: "gemini" })).toEqual([{ at: "2026-09-26T10:00:01.000Z", kind: "gemini", entry: interaction }]);
+        expect(await store.listLogs(other.id)).toHaveLength(1);
+        expect(await store.listLogs("run_missing")).toEqual([]);
+        await expectStoreError(store.appendLog("run_missing", "orchestrator", {}), "NOT_FOUND");
+      });
+    });
+
     describe("counts, copies, and health", () => {
       it("tallies each run and zeroes unknown IDs", async () => {
         const run = await store.insertRun(aRun({ stage: "verify" }));

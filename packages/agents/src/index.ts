@@ -18,4 +18,4 @@ export { CounterTestRunner, runStatus, outcomeOf } from "./verify/counter-tests.
 export type { CounterTest, CounterTestRun, CounterTestOutcome, RunStatus } from "./verify/counter-tests.js";
 export { CHALLENGER_SYSTEM_PROMPT } from "./verify/prompt.js";
 export { repairAndVerify, MAX_ATTEMPTS_PER_DIAGNOSIS } from "./pipeline.js";
-export type { RepairAndVerifyInput, RepairAndVerifyDeps, RepairAndVerifyResult, AttemptRecord } from "./pipeline.js";
+export type { RepairAndVerifyInput, RepairAndVerifyDeps, RepairAndVerifyResult, AttemptRecord, RepairProgress } from "./pipeline.js";

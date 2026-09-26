@@ -1,0 +1,28 @@
+{
+  "name": "@repro/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Run Orchestrator: takes each queued Run through ingest, detect, diagnose, repair, and verify",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.1.0",
+    "@repro/agents": "*",
+    "@repro/api": "*",
+    "@repro/contracts": "*",
+    "@repro/detect": "*",
+    "@repro/executor": "*",
+    "@repro/github": "*",
+    "@repro/ingest": "*",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

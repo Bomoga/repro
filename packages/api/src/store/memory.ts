@@ -20,6 +20,7 @@ import {
   type NewRun,
   type PatchDecision,
   type RunCounts,
+  type RunLogRecord,
   type RunQuery,
   type RunStore,
   type RunUpdate,
@@ -30,6 +31,7 @@ interface RunRecord {
   findings: Finding[];
   diagnoses: Diagnosis[];
   patches: Patch[];
+  logs: RunLogRecord[];
 }
 
 // Every value crossing the store boundary is copied, so callers can't mutate stored state through
@@ -120,7 +122,7 @@ export class InMemoryRunStore implements RunStore {
   async insertRun(run: Run): Promise<Run> {
     assertRunConsistent(run);
     if (this.runs.has(run.id)) throw new StoreError("CONFLICT", `run ${run.id} already exists`);
-    this.runs.set(run.id, { run: copy(run), findings: [], diagnoses: [], patches: [] });
+    this.runs.set(run.id, { run: copy(run), findings: [], diagnoses: [], patches: [], logs: [] });
     return copy(run);
   }
 
@@ -183,6 +185,24 @@ export class InMemoryRunStore implements RunStore {
     const next = decidedPatch(found.record.patches[found.index]!, decision);
     found.record.patches[found.index] = next;
     return copy(next);
+  }
+
+  async claimNextQueued(): Promise<Run | null> {
+    const oldestFirst = (a: RunRecord, b: RunRecord) =>
+      a.run.startedAt !== b.run.startedAt ? (a.run.startedAt < b.run.startedAt ? -1 : 1) : a.run.id < b.run.id ? -1 : 1;
+    const next = [...this.runs.values()].filter((record) => record.run.status === "queued").sort(oldestFirst)[0];
+    if (!next) return null;
+    next.run = { ...next.run, status: "running" };
+    return copy(next.run);
+  }
+
+  async appendLog(runId: string, kind: string, entry: unknown, at?: string): Promise<void> {
+    this.requireRun(runId).logs.push(copy({ at: at ?? new Date().toISOString(), kind, entry }));
+  }
+
+  async listLogs(runId: string, query: { kind?: string } = {}): Promise<RunLogRecord[]> {
+    const logs = this.runs.get(runId)?.logs ?? [];
+    return logs.filter((record) => query.kind === undefined || record.kind === query.kind).map(copy);
   }
 
   async ping(): Promise<void> {}

@@ -16,7 +16,17 @@ export interface RepairAndVerifyInput {
   testCommand?: string;
 }
 
-export type RepairAndVerifyDeps = RepairDeps & Omit<ChallengeDeps, "gemini" | "executor">;
+/** Where repairAndVerify is, for a live view of the Run: the stage in flight, and each attempt's
+ *  Patch as soon as it exists. Awaited, so the caller can persist one step before the next. */
+export type RepairProgress =
+  | { type: "repairing"; attempt: number }
+  | { type: "challenging"; attempt: number; patch: Patch }
+  | { type: "attempt-finished"; attempt: number; patch: Patch };
+
+export type RepairAndVerifyDeps = RepairDeps &
+  Omit<ChallengeDeps, "gemini" | "executor"> & {
+    onProgress?: (event: RepairProgress) => void | Promise<void>;
+  };
 
 export interface AttemptRecord {
   repair: RepairResult;
@@ -45,11 +55,13 @@ export async function repairAndVerify(input: RepairAndVerifyInput, deps: RepairA
   let replay: CounterTest[] = [];
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_DIAGNOSIS; attempt++) {
+    await deps.onProgress?.({ type: "repairing", attempt });
     const repaired = await repair({ ...input, feedback, attempt }, deps);
     const testCommand = input.testCommand ?? repaired.testCommand;
 
     if (repaired.patch.status === "rejected") {
       attempts.push({ repair: repaired, patch: repaired.patch });
+      await deps.onProgress?.({ type: "attempt-finished", attempt, patch: repaired.patch });
       feedback = describeUnfinished(repaired);
       continue;
     }
@@ -58,15 +70,18 @@ export async function repairAndVerify(input: RepairAndVerifyInput, deps: RepairA
     if (failing.length > 0) {
       const patch = applyGate({ ...repaired.patch, challengerNotes: `Not challenged: ${failing.map((c) => c.detail).join("; ")}.` });
       attempts.push({ repair: repaired, patch });
+      await deps.onProgress?.({ type: "attempt-finished", attempt, patch });
       feedback = describeFailedChecks(repaired, failing.map((c) => c.detail));
       continue;
     }
 
+    await deps.onProgress?.({ type: "challenging", attempt, patch: repaired.patch });
     const challenged = await challenge(
       { patch: repaired.patch, diagnosis: input.diagnosis, findings: input.findings, workspace: input.workspace, testCommand, replay },
       deps,
     );
     attempts.push({ repair: repaired, challenge: challenged, patch: challenged.patch });
+    await deps.onProgress?.({ type: "attempt-finished", attempt, patch: challenged.patch });
     if (challenged.patch.status === "verified") return { patch: challenged.patch, attempts };
     const broke = latestRuns(challenged.counterTests).filter((run) => run.outcome === "hole-open" || run.outcome === "regression");
     replay = broke.map((run) => run.test);
