@@ -1,0 +1,55 @@
+# privacy-patterns (Assurant, CLAUDE.md section 8). Note: semgrep metavariable-regex is anchored at
+# the start of the bound text, so "contains" checks are written as ".*(...)".
+rules:
+  - id: privacy.third-party-forwarding.js
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      User-supplied content ($BODY) is sent to $URL, which is not a recognized model-provider
+      endpoint. Confirm the tool discloses this third party to the people whose data it sends.
+    metadata:
+      category: privacy
+      privacy-check: third-party-forwarding
+      cwe: ["CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: 'fetch("$URL", {..., body: $BODY, ...})'
+          - pattern: axios.post("$URL", $BODY, ...)
+          - pattern: axios.put("$URL", $BODY, ...)
+          - pattern: axios.patch("$URL", $BODY, ...)
+          - pattern: 'axios({..., url: "$URL", data: $BODY, ...})'
+          - pattern: navigator.sendBeacon("$URL", $BODY)
+      - metavariable-regex:
+          metavariable: $URL
+          regex: ^https?://(?!(api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|[a-z0-9-]+\.openai\.azure\.com|api\.mistral\.ai|api\.cohere\.(ai|com)|api\.groq\.com|localhost|127\.0\.0\.1)(:\d+)?(/|$))
+      - metavariable-regex:
+          metavariable: $BODY
+          regex: (?is).*(prompt|message|user_?input|query|conversation|chat|transcript|content)
+
+  - id: privacy.third-party-forwarding.py
+    languages: [python]
+    severity: ERROR
+    message: >-
+      User-supplied content ($BODY) is sent to $URL, which is not a recognized model-provider
+      endpoint. Confirm the tool discloses this third party to the people whose data it sends.
+    metadata:
+      category: privacy
+      privacy-check: third-party-forwarding
+      cwe: ["CWE-359: Exposure of Private Personal Information to an Unauthorized Actor"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: requests.$METHOD("$URL", ..., json=$BODY, ...)
+          - pattern: requests.$METHOD("$URL", ..., data=$BODY, ...)
+          - pattern: httpx.$METHOD("$URL", ..., json=$BODY, ...)
+          - pattern: httpx.$METHOD("$URL", ..., data=$BODY, ...)
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(post|put|patch)$
+      - metavariable-regex:
+          metavariable: $URL
+          regex: ^https?://(?!(api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|[a-z0-9-]+\.openai\.azure\.com|api\.mistral\.ai|api\.cohere\.(ai|com)|api\.groq\.com|localhost|127\.0\.0\.1)(:\d+)?(/|$))
+      - metavariable-regex:
+          metavariable: $BODY
+          regex: (?is).*(prompt|message|user_?input|query|conversation|chat|transcript|content)

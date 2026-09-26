@@ -1,0 +1,63 @@
+# privacy-patterns (Assurant, CLAUDE.md section 8). Note: semgrep metavariable-regex is anchored at
+# the start of the bound text, so "contains" checks are written as ".*(...)".
+rules:
+  - id: privacy.unencrypted-conversation-storage.js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Conversation history is written to local storage without encryption. Anyone with access
+      to the device or profile can read it.
+    metadata:
+      category: privacy
+      privacy-check: unencrypted-conversation-storage
+      cwe: ["CWE-312: Cleartext Storage of Sensitive Information"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: localStorage.setItem($KEY, $VAL)
+                  - pattern: sessionStorage.setItem($KEY, $VAL)
+                  - pattern: window.localStorage.setItem($KEY, $VAL)
+                  - pattern: $FS.writeFileSync($KEY, $VAL, ...)
+                  - pattern: $FS.writeFile($KEY, $VAL, ...)
+                  - pattern: writeFileSync($KEY, $VAL, ...)
+                  - pattern: writeFile($KEY, $VAL, ...)
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: (?is).*(history|conversation|messages|chat|transcript)
+          - patterns:
+              - pattern-either:
+                  - pattern: localStorage.setItem($KEY, $VAL)
+                  - pattern: sessionStorage.setItem($KEY, $VAL)
+                  - pattern: window.localStorage.setItem($KEY, $VAL)
+                  - pattern: $FS.writeFileSync($KEY, $VAL, ...)
+                  - pattern: $FS.writeFile($KEY, $VAL, ...)
+                  - pattern: writeFileSync($KEY, $VAL, ...)
+                  - pattern: writeFile($KEY, $VAL, ...)
+              - metavariable-regex:
+                  metavariable: $VAL
+                  regex: (?is).*(history|conversation|messages|chat|transcript)
+      - pattern-not-regex: (?i)(encrypt|cipher|seal)
+
+  - id: privacy.unencrypted-conversation-storage.py
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Conversation history is written to local storage without encryption. Anyone with access
+      to the device or profile can read it.
+    metadata:
+      category: privacy
+      privacy-check: unencrypted-conversation-storage
+      cwe: ["CWE-312: Cleartext Storage of Sensitive Information"]
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: json.dump($VAL, ...)
+          - pattern: pickle.dump($VAL, ...)
+          - pattern: $F.write($VAL)
+          - pattern: $P.write_text($VAL, ...)
+      - metavariable-regex:
+          metavariable: $VAL
+          regex: (?is).*(history|conversation|messages|chat|transcript)
+      - pattern-not-regex: (?i)(encrypt|cipher|seal)
