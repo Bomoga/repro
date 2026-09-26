@@ -3,6 +3,7 @@
 export { Orchestrator, type OrchestratorOptions } from "./orchestrator.ts";
 export { processRun, type PipelineDeps, type Stages } from "./pipeline.ts";
 export { RunLog } from "./run-log.ts";
+export { PullRequestSync } from "./pull-request-sync.ts";
 export {
   GitHubPullRequests,
   pullRequestBody,
