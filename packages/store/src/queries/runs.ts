@@ -104,6 +104,20 @@ export function runQueries(models: StoreModels) {
       return doc ? RunSchema.parse(doc) : null;
     },
 
+    /**
+     * Claims one specific Run: atomically moves it from queued to running and returns it. Null when
+     * it isn't queued (already claimed, finished, or missing), so two callers handed the same Run
+     * ID never both start it.
+     */
+    async claim(id: string): Promise<Run | null> {
+      const doc = await RunModel.findOneAndUpdate(
+        { id, status: "queued" },
+        { $set: { status: "running" } },
+        { returnDocument: "after" },
+      ).lean();
+      return doc ? RunSchema.parse(doc) : null;
+    },
+
     /** Records the stage now in flight. Use `complete` to reach "done". */
     async setStage(id: string, stage: Exclude<RunStage, "done">): Promise<Run> {
       if ((stage as RunStage) === "done") throw new StoreError(`use complete() to move run ${id} to done`);
