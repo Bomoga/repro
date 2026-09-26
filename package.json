@@ -10,7 +10,7 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "dev:api": "npm run dev -w @repro/api",
-    "cli": "tsx packages/cli/src/index.ts",
+    "cli": "node packages/cli/bin/repro.js",
     "seed": "npm run seed -w @repro/api"
   },
   "engines": {

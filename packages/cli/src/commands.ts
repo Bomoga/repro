@@ -1,74 +1,150 @@
-import type { Patch, Run } from "@repro/contracts";
-import type { ApiClient } from "./client.ts";
+import type { Run } from "@repro/contracts";
+import { apiErrorCode, describeError, isUnreachable, type ApiClient } from "./client.ts";
+import { formatDuration, painter, renderCompletion, renderRunDetail, renderRunTable, targetLabel, type Paint } from "./format.ts";
+import { resolveScanTarget } from "./targets.ts";
 
-export interface Io {
-  log(line: string): void;
+// The commands themselves, free of argv parsing and process globals: everything they touch comes
+// in through CommandContext, so tests drive them against a real API with a fake clock.
+//
+// Exit codes: 0 success; 1 failure (run failed, not found, bad input, API unreachable);
+// 2 watch timed out with the run still in flight.
+
+export interface CommandContext {
+  client: ApiClient;
+  apiUrl: string;
+  out(line: string): void;
+  err(line: string): void;
+  color: boolean;
+  now(): Date;
+  sleep(ms: number): Promise<void>;
+  cwd: string;
+  exists?: (path: string) => boolean;
 }
 
-function fmtRun(run: Run): string {
-  return `${run.id}  ${run.status.padEnd(9)} ${run.stage.padEnd(8)} ${run.target.kind}:${run.target.ref}  started ${run.startedAt}`;
+const FINAL: ReadonlySet<Run["status"]> = new Set(["completed", "failed"]);
+
+/** Consecutive failed polls `watch` tolerates before giving up. */
+export const WATCH_MAX_POLL_FAILURES = 5;
+
+function paintOf(ctx: CommandContext): Paint {
+  return painter(ctx.color);
 }
 
-function fmtPatch(patch: Patch): string {
-  const decidable = patch.status === "verified" ? " [decidable: merge|reject]" : "";
-  return `  ${patch.id}  ${patch.status.padEnd(9)} verdict=${patch.challengerVerdict}${decidable}`;
+function printJson(ctx: CommandContext, value: unknown): void {
+  ctx.out(JSON.stringify(value, null, 2));
 }
 
-export async function runStatus(client: ApiClient, io: Io, runId?: string): Promise<void> {
-  if (!runId) {
-    const runs = await client.listRuns();
-    if (runs.length === 0) {
-      io.log("No runs yet. Start one with `repro scan <target-ref>`.");
-      return;
-    }
-    io.log(`${runs.length} run(s):`);
-    for (const run of runs) io.log(fmtRun(run));
-    return;
+export interface StatusOptions {
+  runId?: string;
+  status?: Run["status"];
+  limit?: number;
+  json?: boolean;
+}
+
+export async function statusCommand(ctx: CommandContext, options: StatusOptions): Promise<number> {
+  const paint = paintOf(ctx);
+  if (options.runId) {
+    const detail = await ctx.client.runs.detail.query({ runId: options.runId });
+    if (options.json) printJson(ctx, detail);
+    else for (const line of renderRunDetail(detail, ctx.now(), paint)) ctx.out(line);
+    return 0;
   }
 
-  const run = await client.getRun(runId);
-  io.log(fmtRun(run));
-
-  const [findings, diagnoses, patches] = await Promise.all([
-    client.listFindings(runId),
-    client.listDiagnoses(runId),
-    client.listPatches(runId),
-  ]);
-  io.log(`  ${findings.length} finding(s), ${diagnoses.length} diagnosis(es), ${patches.length} patch(es)`);
-  for (const patch of patches) io.log(fmtPatch(patch));
+  const summaries = await ctx.client.runs.summaries.query({ status: options.status, limit: options.limit });
+  if (options.json) {
+    printJson(ctx, summaries);
+  } else if (summaries.length === 0) {
+    ctx.out(
+      options.status
+        ? `No ${options.status} runs.`
+        : "No runs yet. Queue one with `repro scan <path | owner/repo>`.",
+    );
+  } else {
+    for (const line of renderRunTable(summaries, ctx.now(), paint)) ctx.out(line);
+  }
+  return 0;
 }
 
-export async function runWatch(
-  client: ApiClient,
-  io: Io,
-  runId: string,
-  options: { intervalMs?: number; maxIterations?: number; sleep?: (ms: number) => Promise<void> } = {},
-): Promise<void> {
-  const intervalMs = options.intervalMs ?? 5_000;
-  const maxIterations = options.maxIterations ?? Infinity;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+export interface WatchOptions {
+  intervalMs: number;
+  timeoutMs?: number;
+  json?: boolean;
+}
 
-  let last: { stage: Run["stage"]; status: Run["status"] } | undefined;
-  const terminal = new Set<Run["status"]>(["completed", "failed"]);
+export async function watchCommand(ctx: CommandContext, runId: string, options: WatchOptions): Promise<number> {
+  const paint = paintOf(ctx);
+  const started = ctx.now().getTime();
+  let last: Pick<Run, "stage" | "status"> | undefined;
+  let failures = 0;
 
-  for (let i = 0; i < maxIterations; i++) {
-    const run = await client.getRun(runId);
+  for (;;) {
+    let run: Run;
+    try {
+      run = await ctx.client.runs.get.query({ runId });
+      failures = 0;
+    } catch (error) {
+      // Retry what can clear up on its own (API restarting, tunnel blip, Run Store hiccup);
+      // give up at once on answers that won't change, like NOT_FOUND.
+      const transient = isUnreachable(error) || apiErrorCode(error) === "INTERNAL_SERVER_ERROR";
+      if (!transient || ++failures >= WATCH_MAX_POLL_FAILURES) throw error;
+      ctx.err(`poll failed (${failures}/${WATCH_MAX_POLL_FAILURES}), retrying: ${describeError(error, ctx.apiUrl)}`);
+      await ctx.sleep(options.intervalMs);
+      continue;
+    }
+
+    const elapsed = ctx.now().getTime() - started;
     if (!last || last.stage !== run.stage || last.status !== run.status) {
-      io.log(fmtRun(run));
+      if (options.json) ctx.out(JSON.stringify(run));
+      else ctx.out(`${formatDuration(elapsed).padStart(6)}  ${paint(run.status === "failed" ? "red" : run.status === "completed" ? "green" : "cyan", run.status.padEnd(9))} ${run.stage}`);
       last = { stage: run.stage, status: run.status };
     }
-    if (terminal.has(run.status)) return;
-    if (i < maxIterations - 1) await sleep(intervalMs);
+
+    if (FINAL.has(run.status)) {
+      if (!options.json) ctx.out(renderCompletion(await ctx.client.runs.detail.query({ runId })));
+      return run.status === "completed" ? 0 : 1;
+    }
+    if (options.timeoutMs !== undefined && elapsed >= options.timeoutMs) {
+      ctx.err(`timed out after ${formatDuration(elapsed)}; ${run.id} is still ${run.status} at stage ${run.stage}`);
+      return 2;
+    }
+    await ctx.sleep(options.intervalMs);
   }
 }
 
-export async function runScan(client: ApiClient, io: Io, targetRef: string, targetKind: "local" | "github"): Promise<void> {
-  const run = await client.createRun(targetRef, targetKind);
-  io.log(`Queued ${run.id} for ${targetKind}:${targetRef}`);
-  io.log(`Watch it with: repro watch ${run.id}`);
+export interface ScanOptions {
+  kind?: Run["target"]["kind"];
+  watch?: boolean;
+  intervalMs: number;
+  timeoutMs?: number;
+  json?: boolean;
 }
 
-export async function runDecide(client: ApiClient, io: Io, patchId: string, decision: "merge" | "reject"): Promise<void> {
-  const patch = await client.decidePatch(patchId, decision);
-  io.log(`${patch.id} -> ${patch.status}`);
+export async function scanCommand(ctx: CommandContext, input: string, options: ScanOptions): Promise<number> {
+  const target = resolveScanTarget(input, { kind: options.kind, cwd: ctx.cwd, exists: ctx.exists });
+  const run = await ctx.client.runs.create.mutate({ targetRef: target.ref, targetKind: target.kind, trigger: "manual" });
+  // One JSON line, so `scan --json --watch` is a clean stream of JSON lines.
+  if (options.json) ctx.out(JSON.stringify(run));
+  else ctx.out(`Queued ${run.id} for ${targetLabel(run.target)}`);
+  if (!options.watch) {
+    if (!options.json) ctx.out(`Follow it with: repro watch ${run.id}`);
+    return 0;
+  }
+  return watchCommand(ctx, run.id, { intervalMs: options.intervalMs, timeoutMs: options.timeoutMs, json: options.json });
+}
+
+export async function decideCommand(ctx: CommandContext, patchId: string, decision: "merge" | "reject"): Promise<number> {
+  const patch = await ctx.client.patches.decide.mutate({ patchId, decision });
+  ctx.out(`${patch.id} is now ${patch.status}`);
+  return 0;
+}
+
+/** Runs a command, turning any error into one readable line on stderr and exit code 1. */
+export async function guarded(ctx: CommandContext, command: () => Promise<number>): Promise<number> {
+  try {
+    return await command();
+  } catch (error) {
+    const code = apiErrorCode(error);
+    ctx.err(`error: ${describeError(error, ctx.apiUrl)}${code && code !== "NOT_FOUND" && code !== "BAD_REQUEST" && code !== "CONFLICT" ? ` (${code})` : ""}`);
+    return 1;
+  }
 }

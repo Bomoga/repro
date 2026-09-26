@@ -4,17 +4,20 @@
   "private": true,
   "type": "module",
   "bin": {
-    "repro": "./src/index.ts"
+    "repro": "./bin/repro.js"
   },
   "scripts": {
+    "start": "node bin/repro.js",
     "test": "vitest run"
   },
   "dependencies": {
     "@repro/contracts": "*",
-    "commander": "^13.1.0"
+    "@trpc/client": "^11.19.0",
+    "commander": "^13.1.0",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
-    "tsx": "^4.23.15",
+    "@repro/api": "*",
     "vitest": "^3.2.7"
   }
 }
