@@ -11,7 +11,9 @@
     "status": "tsx src/index.ts status"
   },
   "dependencies": {
-    "@repro/contracts": "*"
+    "@repro/api": "*",
+    "@repro/contracts": "*",
+    "@trpc/client": "^11.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

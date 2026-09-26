@@ -1,1 +1,7 @@
+node_modules/
+**/dist/
+.vite/
+.env
+.env.*
+!.env.example
 repro-developer-guide.md

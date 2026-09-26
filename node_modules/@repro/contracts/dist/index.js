@@ -1,27 +1,33 @@
-export const demoRun = {
-    id: "run-demo-001",
-    trigger: "manual",
-    target: { kind: "local", ref: "." },
-    stage: "verify",
-    status: "running",
-    startedAt: new Date().toISOString(),
-    logRef: "logs/demo-run-001.json"
-};
-export const demoFindings = [
-    {
-        id: "finding-1",
-        detectorId: "semgrep",
-        ruleId: "no-unsafe-eval",
-        severity: "high",
-        category: "correctness",
-        file: "src/auth.ts",
-        lineStart: 17,
-        lineEnd: 21,
-        message: "Unsafe eval used to parse user input.",
-        evidence: "const token = eval(userInput);",
-        reproducible: true,
-        reproductionCommand: "npm test -- --runInBand auth",
-        reproductionOutput: "FAIL: auth.spec.ts - token parsing should reject invalid JSON",
-        createdAt: new Date().toISOString()
-    }
-];
+import { z } from "zod";
+export const SeveritySchema = z.enum(["info", "low", "medium", "high", "critical"]);
+export const StageSchema = z.enum(["ingest", "detect", "diagnose", "repair", "verify", "done"]);
+export const RunStatusSchema = z.enum(["queued", "running", "blocked", "completed", "failed"]);
+export const TriggerSchema = z.enum(["manual", "schedule", "webhook"]);
+export const FindingSchema = z.object({
+    id: z.string(), detectorId: z.string(), ruleId: z.string(), severity: SeveritySchema,
+    category: z.string(), file: z.string(), lineStart: z.number(), lineEnd: z.number(),
+    message: z.string(), evidence: z.string(), reproducible: z.boolean().default(false),
+    reproductionCommand: z.string().optional(), reproductionOutput: z.string().optional(), createdAt: z.string()
+});
+export const DiagnosisSchema = z.object({
+    id: z.string(), findingIds: z.array(z.string()), rootCause: z.string(), proposedStrategy: z.string(),
+    riskNotes: z.string(), model: z.string(), createdAt: z.string()
+});
+export const PatchSchema = z.object({
+    id: z.string(), diagnosisId: z.string(), diff: z.string(), filesChanged: z.array(z.string()),
+    testsPassed: z.boolean(), originalFindingReproduces: z.boolean(), reproductionOutputAfter: z.string().optional(),
+    regressionFindings: z.array(FindingSchema), challengerVerdict: z.enum(["confirmed", "disputed"]),
+    challengerNotes: z.string().optional(), status: z.enum(["proposed", "verified", "rejected", "merged"]),
+    prUrl: z.string().url().optional()
+});
+export const RunSchema = z.object({
+    id: z.string(), trigger: TriggerSchema, target: z.object({ kind: z.enum(["local", "github"]), ref: z.string() }),
+    stage: StageSchema, status: RunStatusSchema, startedAt: z.string(), logRef: z.string()
+});
+export const WorkspaceSchema = z.object({
+    runId: z.string(), path: z.string(), fileIndex: z.array(z.string()), languages: z.array(z.string()), headCommit: z.string()
+});
+export const ExecRequestSchema = z.object({ workspacePath: z.string(), command: z.string(), timeoutMs: z.number() });
+export const ExecResultSchema = z.object({
+    exitCode: z.number(), stdout: z.string(), stderr: z.string(), timedOut: z.boolean(), durationMs: z.number()
+});

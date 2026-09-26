@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @repro/contracts && npm run build --workspace @repro/api && npm run build --workspace @repro/cli",
+    "build": "npm run build --workspace @repro/contracts && npm run build --workspace @repro/api && npm run build --workspace @repro/cli && npm run build --workspace @repro/web",
     "dev": "npm run dev --workspace @repro/api",
     "status": "npm run status --workspace @repro/cli",
     "web": "npm run dev --workspace @repro/web"

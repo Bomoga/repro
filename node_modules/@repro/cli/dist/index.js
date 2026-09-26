@@ -1,29 +1,31 @@
 #!/usr/bin/env node
+import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 const apiBase = process.env.REPRO_API_URL ?? 'http://localhost:3001';
-async function getStatus() {
-    const response = await fetch(`${apiBase}/status`);
-    if (!response.ok) {
-        throw new Error(`status request failed: ${response.status}`);
-    }
-    const payload = await response.json();
-    return payload;
-}
+const client = createTRPCProxyClient({
+    links: [httpBatchLink({ url: `${apiBase}/trpc` })]
+});
 async function main() {
-    const [command] = process.argv.slice(2);
+    const [command, requestedRunId] = process.argv.slice(2);
     if (command === 'status') {
-        const status = await getStatus();
-        console.log(`Run: ${status.run.id} (${status.run.status})`);
-        console.log(`Stage: ${status.run.stage}`);
-        console.log(`Findings: ${status.summary.totalFindings}`);
-        console.log(`Reproducible: ${status.summary.reproducibleFindings}`);
-        console.log(`Patch status: ${status.summary.status}`);
-        console.log(`Challenger verdict: ${status.summary.challengerVerdict}`);
+        const runs = await client.runs.list.query({ limit: 10 });
+        const runId = requestedRunId ?? runs[0]?.id;
+        if (!runId) {
+            console.log('No runs found in the Run Store.');
+            return;
+        }
+        const details = await client.runs.get.query({ id: runId });
+        console.log(`Run: ${details.run.id} (${details.run.status})`);
+        console.log(`Stage: ${details.run.stage}`);
+        console.log(`Findings: ${details.findings.length}`);
+        console.log(`Reproducible: ${details.findings.filter((finding) => finding.reproducible).length}`);
+        for (const patch of details.patches) {
+            console.log(`Patch ${patch.id}: ${patch.status}; tests ${patch.testsPassed ? 'passed' : 'failed'}; challenger ${patch.challengerVerdict}`);
+        }
         return;
     }
-    console.log('Usage: repro status');
+    console.log('Usage: repro status [run-id]');
 }
 main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
 });
-export {};

@@ -1,112 +1,57 @@
-export type Severity = "info" | "low" | "medium" | "high" | "critical";
-export type Stage = "ingest" | "detect" | "diagnose" | "repair" | "verify" | "done";
-export type RunStatus = "queued" | "running" | "blocked" | "completed" | "failed";
-export type Trigger = "manual" | "schedule" | "webhook";
+import { z } from "zod";
 
-export interface Finding {
-  id: string;
-  detectorId: string;
-  ruleId: string;
-  severity: Severity;
-  category: string;
-  file: string;
-  lineStart: number;
-  lineEnd: number;
-  message: string;
-  evidence: string;
-  reproducible: boolean;
-  reproductionCommand?: string;
-  reproductionOutput?: string;
-  createdAt: string;
-}
+export const SeveritySchema = z.enum(["info", "low", "medium", "high", "critical"]);
+export const StageSchema = z.enum(["ingest", "detect", "diagnose", "repair", "verify", "done"]);
+export const RunStatusSchema = z.enum(["queued", "running", "blocked", "completed", "failed"]);
+export const TriggerSchema = z.enum(["manual", "schedule", "webhook"]);
 
-export interface Diagnosis {
-  id: string;
-  findingIds: string[];
-  rootCause: string;
-  proposedStrategy: string;
-  riskNotes: string;
-  model: string;
-  createdAt: string;
-}
+export const FindingSchema = z.object({
+  id: z.string(), detectorId: z.string(), ruleId: z.string(), severity: SeveritySchema,
+  category: z.string(), file: z.string(), lineStart: z.number(), lineEnd: z.number(),
+  message: z.string(), evidence: z.string(), reproducible: z.boolean().default(false),
+  reproductionCommand: z.string().optional(), reproductionOutput: z.string().optional(), createdAt: z.string()
+});
 
-export interface Patch {
-  id: string;
-  diagnosisId: string;
-  diff: string;
-  filesChanged: string[];
-  testsPassed: boolean;
-  originalFindingReproduces: boolean;
-  reproductionOutputAfter?: string;
-  regressionFindings: Finding[];
-  challengerVerdict: "confirmed" | "disputed";
-  challengerNotes?: string;
-  status: "proposed" | "verified" | "rejected" | "merged";
-  prUrl?: string;
-}
+export const DiagnosisSchema = z.object({
+  id: z.string(), findingIds: z.array(z.string()), rootCause: z.string(), proposedStrategy: z.string(),
+  riskNotes: z.string(), model: z.string(), createdAt: z.string()
+});
 
-export interface Run {
-  id: string;
-  trigger: Trigger;
-  target: { kind: "local" | "github"; ref: string };
-  stage: Stage;
-  status: RunStatus;
-  startedAt: string;
-  logRef: string;
-}
+export const PatchSchema = z.object({
+  id: z.string(), diagnosisId: z.string(), diff: z.string(), filesChanged: z.array(z.string()),
+  testsPassed: z.boolean(), originalFindingReproduces: z.boolean(), reproductionOutputAfter: z.string().optional(),
+  regressionFindings: z.array(FindingSchema), challengerVerdict: z.enum(["confirmed", "disputed"]),
+  challengerNotes: z.string().optional(), status: z.enum(["proposed", "verified", "rejected", "merged"]),
+  prUrl: z.string().url().optional()
+});
 
-export interface Workspace {
-  runId: string;
-  path: string;
-  fileIndex: string[];
-  languages: string[];
-  headCommit: string;
-}
+export const RunSchema = z.object({
+  id: z.string(), trigger: TriggerSchema, target: z.object({ kind: z.enum(["local", "github"]), ref: z.string() }),
+  stage: StageSchema, status: RunStatusSchema, startedAt: z.string(), logRef: z.string()
+});
 
-export interface ExecRequest {
-  workspacePath: string;
-  command: string;
-  timeoutMs: number;
-}
+export const WorkspaceSchema = z.object({
+  runId: z.string(), path: z.string(), fileIndex: z.array(z.string()), languages: z.array(z.string()), headCommit: z.string()
+});
 
-export interface ExecResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  durationMs: number;
-}
+export const ExecRequestSchema = z.object({ workspacePath: z.string(), command: z.string(), timeoutMs: z.number() });
+export const ExecResultSchema = z.object({
+  exitCode: z.number(), stdout: z.string(), stderr: z.string(), timedOut: z.boolean(), durationMs: z.number()
+});
+
+export type Severity = z.infer<typeof SeveritySchema>;
+export type Stage = z.infer<typeof StageSchema>;
+export type RunStatus = z.infer<typeof RunStatusSchema>;
+export type Trigger = z.infer<typeof TriggerSchema>;
+export type Finding = z.infer<typeof FindingSchema>;
+export type Diagnosis = z.infer<typeof DiagnosisSchema>;
+export type Patch = z.infer<typeof PatchSchema>;
+export type Run = z.infer<typeof RunSchema>;
+export type Workspace = z.infer<typeof WorkspaceSchema>;
+export type ExecRequest = z.infer<typeof ExecRequestSchema>;
+export type ExecResult = z.infer<typeof ExecResultSchema>;
 
 export interface DetectorAdapter {
   id: string;
   run(workspace: Workspace, exec: (request: ExecRequest) => Promise<ExecResult>): Promise<Finding[]>;
 }
-
-export const demoRun: Run = {
-  id: "run-demo-001",
-  trigger: "manual",
-  target: { kind: "local", ref: "." },
-  stage: "verify",
-  status: "running",
-  startedAt: new Date().toISOString(),
-  logRef: "logs/demo-run-001.json"
-};
-
-export const demoFindings: Finding[] = [
-  {
-    id: "finding-1",
-    detectorId: "semgrep",
-    ruleId: "no-unsafe-eval",
-    severity: "high",
-    category: "correctness",
-    file: "src/auth.ts",
-    lineStart: 17,
-    lineEnd: 21,
-    message: "Unsafe eval used to parse user input.",
-    evidence: "const token = eval(userInput);",
-    reproducible: true,
-    reproductionCommand: "npm test -- --runInBand auth",
-    reproductionOutput: "FAIL: auth.spec.ts - token parsing should reject invalid JSON",
-    createdAt: new Date().toISOString()
-  }
-];
