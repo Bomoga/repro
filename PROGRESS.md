@@ -6,9 +6,13 @@ One line per session: what was done, what's next.
 - 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Merged `lane-3` into main (PR #1, merge commit).
 - 2026-09-26 s3: contracts approved (section 4 as written; Lane 2's `@repro/contracts` follows it). Lane 3 doesn't merge `lane-2`; Lane 2 merges its own branch. Added Python-target coverage for test-command detection and secret extraction (74 unit tests). Next: when Lane 2's work reaches main, merge main into `lane-3`, swap `src/contracts.ts` for re-exports from `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
 
-## Waiting on Lane 2 (not Lane 3's to merge)
+- 2026-09-26 s4: reviewed Lane 4's PR #3 (merged by others despite the review) and Lane 2's PR #4; resolved #4's conflicts with #3 on `lane-2` (approved Zod contracts kept, committed node_modules/dist untracked, Lane 4's web/cli excluded from the root type-check) and merged it. `@repro/agents` now joins the npm workspace, re-exports `@repro/contracts`, extends `tsconfig.base.json`, and has `test/sandbox.int.ts` (Lane 2's ingest/detect/reproduce + DockerExecutor + real Gemini). Next: build the sandbox image and run `sandbox.int.ts`.
 
-- **`@repro/contracts` and the real sandbox** are on `lane-2` only. Once Lane 2 merges them into main: swap the local contracts mirror for the package and run the integration tests through `DockerExecutor` (Docker Desktop running, image built from `sandbox/Dockerfile`; the build downloads base images, Semgrep, and rule packs). Until then, integration tests answer commands with oracles and never execute model code on the host.
+## Waiting
+
+- **Real sandbox run:** `test/sandbox.int.ts` skips until Docker Desktop is running and `npm run sandbox:build` has built `repro-sandbox:dev` (the build downloads base images, Semgrep, and rule packs).
+- **Lane 1** has a third `@repro/contracts` (plus api/cli packages) on `lane-1`; it will hit the same add/add conflicts against main and needs reconciling with the approved package.
+- **Windows:** Lane 2's `repo-adapter.test.ts` symlink test fails on Windows (`C:/etc/hosts`), so the root `npm test` is red on this machine; reported in the PR #4 review.
 
 ## Contracts (approved 2026-09-26: section 4 as written)
 
