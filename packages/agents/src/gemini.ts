@@ -393,6 +393,8 @@ function apiErrorDetail(e: { body?: unknown; error?: unknown; cause?: unknown; m
         continue;
       }
     }
+    // Some endpoints wrap the error object in a one-element array.
+    if (Array.isArray(value)) value = value[0];
     const detail = (value as { error?: { message?: unknown } } | undefined)?.error?.message;
     if (typeof detail === "string" && detail && !String(e.message ?? "").includes(detail)) return detail;
   }

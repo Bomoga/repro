@@ -52,6 +52,14 @@ export class Sandbox {
     await this.git(`reset --hard --quiet ${this.workspace.headCommit}`, "reset the workspace");
   }
 
+  /** Applies a patch file (workspace-relative, harness-written) on top of the current tree. */
+  async applyPatchFile(relativePath: string): Promise<void> {
+    if (!/^[A-Za-z0-9._/-]+$/.test(relativePath) || relativePath.includes("..")) {
+      throw new Error(`unsafe patch file path: ${relativePath}`);
+    }
+    await this.git(`apply --whitespace=nowarn ${relativePath}`, "apply the patch");
+  }
+
   /** The literal `git diff` against `headCommit`: this, never model text, becomes Patch.diff. */
   diff(): Promise<string> {
     return this.git(`diff --no-color --no-ext-diff --no-textconv ${this.workspace.headCommit}`, "diff the workspace");

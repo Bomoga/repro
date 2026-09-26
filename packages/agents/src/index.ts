@@ -11,3 +11,11 @@ export type { RepairInput, RepairDeps, RepairResult, RepairStopReason } from "./
 export { REPAIR_TOOLS, type ToolCallRecord } from "./repair/tools.js";
 export { REPAIR_SYSTEM_PROMPT } from "./repair/prompt.js";
 export { findRegressions } from "./repair/regressions.js";
+export { applyGate, gateChecks, type GateCheck } from "./verify/gate.js";
+export { challenge, decideVerdict, latestRuns, CHALLENGER_TOOLS, MAX_COUNTER_TESTS, MAX_CHALLENGER_TOOL_CALLS } from "./verify/challenger.js";
+export type { ChallengeInput, ChallengeDeps, ChallengeResult } from "./verify/challenger.js";
+export { CounterTestRunner, runStatus, outcomeOf } from "./verify/counter-tests.js";
+export type { CounterTest, CounterTestRun, CounterTestOutcome, RunStatus } from "./verify/counter-tests.js";
+export { CHALLENGER_SYSTEM_PROMPT } from "./verify/prompt.js";
+export { repairAndVerify, MAX_ATTEMPTS_PER_DIAGNOSIS } from "./pipeline.js";
+export type { RepairAndVerifyInput, RepairAndVerifyDeps, RepairAndVerifyResult, AttemptRecord } from "./pipeline.js";

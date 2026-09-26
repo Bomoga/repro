@@ -56,6 +56,8 @@ export interface RepairResult {
   toolCalls: ToolCallRecord[];
   /** The model's own account of its change, from `finish`: prose, not evidence. */
   summary?: string;
+  /** The test command used (supplied or detected). */
+  testCommand?: string;
   /** The harness's own test run after the loop, redacted. */
   testOutput?: string;
   interactionIds: string[];
@@ -220,6 +222,7 @@ async function evaluate(args: {
     stopReason: args.stopReason,
     toolCalls: args.toolCalls,
     summary: args.summary,
+    testCommand: args.testCommand,
     testOutput,
     interactionIds: args.interactionIds,
   };

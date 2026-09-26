@@ -213,6 +213,18 @@ describe("createGeminiClient", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("surfaces a depleted-credits 402 without retrying, even when the body is an array", async () => {
+    const depleted = Object.assign(new Error('402 API error occurred: {"httpMeta":{}}'), {
+      status: 402,
+      body: JSON.stringify([{ error: { code: 402, message: "Your prepayment credits are depleted.", status: "RESOURCE_EXHAUSTED" } }]),
+    });
+    const { sdk, calls } = fakeSdk(depleted);
+    await expect(
+      createGeminiClient({ sdk, env: {}, sleep: async () => {} }).interact({ role: "repair", systemInstruction: "s", input: "i" }),
+    ).rejects.toMatchObject({ status: 402, retryable: false, message: expect.stringContaining("prepayment credits are depleted") });
+    expect(calls).toHaveLength(1);
+  });
+
   it("does not retry client errors and gives up after maxAttempts", async () => {
     const bad = fakeSdk(httpError(400, "invalid schema"));
     await expect(
