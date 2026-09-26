@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PatchSchema } from "../src/contracts.js";
-import { repairAndVerify, type RepairAndVerifyDeps } from "../src/pipeline.js";
+import { repairAndVerify, type RepairAndVerifyDeps, type RepairProgress } from "../src/pipeline.js";
 import { SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
 import { ESCAPED_FIX, JOINED_FIX, SOUND_FIX, counterTest, verdict } from "./fixtures/scripts.js";
@@ -56,6 +56,33 @@ describe("repairAndVerify", () => {
     const retryPrompt = byRole("repair")[2]!.input as string;
     expect(retryPrompt).toContain("# The previous attempt was rejected");
     expect(retryPrompt).toContain("CHECKS:numeric-injection");
+  });
+
+  it("reports each attempt's stage and Patch as it goes, waiting for the caller", async () => {
+    const { gemini } = scriptedGemini({
+      repair: [...JOINED_FIX, ...SOUND_FIX],
+      challenger: [
+        [{ name: "run_counter_test", args: counterTest("numeric-injection") }],
+        [],
+        verdict("disputed", "getNoteById still splices noteId into the SQL text via join()."),
+        [],
+        verdict("confirmed", "The replayed numeric-injection test passes against this patch."),
+      ],
+    });
+    const events: string[] = [];
+    const onProgress = async (event: RepairProgress) => {
+      await new Promise((resolve) => setTimeout(resolve, 1)); // a caller persisting as it goes
+      events.push(event.type === "repairing" ? `repairing ${event.attempt}` : `${event.type} ${event.attempt} ${event.patch.id} ${event.patch.status}`);
+    };
+    await repairAndVerify(input(), { ...deps(gemini), onProgress });
+    expect(events).toEqual([
+      "repairing 1",
+      "challenging 1 patch-1 proposed",
+      "attempt-finished 1 patch-1 rejected",
+      "repairing 2",
+      "challenging 2 patch-2 proposed",
+      "attempt-finished 2 patch-2 verified",
+    ]);
   });
 
   it("doesn't spend a Challenger call on a patch the deterministic checks already reject", async () => {
