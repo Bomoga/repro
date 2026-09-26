@@ -6,6 +6,7 @@ export { buildApp } from "./app.ts";
 export { InMemoryRunStore, type RunStore } from "./store.ts";
 export { appRouter, type AppRouter } from "./router.ts";
 export type { Context } from "./trpc.ts";
+export { buildTrustReport, type TrustReport } from "./trust.ts";
 
 async function resolveStore(): Promise<RunStore> {
   const uri = process.env.MONGODB_URI;

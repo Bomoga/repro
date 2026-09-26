@@ -2,6 +2,7 @@ import * as z from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "./trpc.ts";
 import { InvalidPatchDecisionError, PatchNotFoundError } from "./store.ts";
+import { buildTrustReport } from "./trust.ts";
 
 // Section 8: only inputs the status surface accepts are a target ref (to start a Run) and
 // merge/reject on a Patch, plus read-only filters/toggles. No free-form/chat input anywhere.
@@ -48,6 +49,16 @@ export const appRouter = router({
       const patch = await ctx.store.getPatch(input.patchId);
       if (!patch) throw new TRPCError({ code: "NOT_FOUND", message: `patch not found: ${input.patchId}` });
       return patch;
+    }),
+
+    // Backs the dashboard's Trust Report view and the PR narrator: a pure, model-free verdict
+    // computed from the Patch's own recorded facts (tests, reproduction, Challenger, regressions).
+    trustReport: publicProcedure.input(z.object({ patchId: z.string(), runId: z.string() })).query(async ({ ctx, input }) => {
+      const patch = await ctx.store.getPatch(input.patchId);
+      if (!patch) throw new TRPCError({ code: "NOT_FOUND", message: `patch not found: ${input.patchId}` });
+      const [diagnoses, findings] = await Promise.all([ctx.store.listDiagnoses(input.runId), ctx.store.listFindings(input.runId)]);
+      const diagnosis = diagnoses.find((d) => d.id === patch.diagnosisId);
+      return buildTrustReport(patch, diagnosis, findings);
     }),
 
     // The only mutation a human (or the dashboard/CLI on their behalf) makes: merge or reject
