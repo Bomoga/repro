@@ -17,7 +17,7 @@ import { Sandbox } from "../sandbox.js";
 import { WorkspaceFiles, WorkspacePathError, splitLines } from "../workspace-files.js";
 import { CounterTestError, CounterTestRunner, type CounterTest, type CounterTestRun } from "./counter-tests.js";
 import { applyGate } from "./gate.js";
-import { CHALLENGER_SYSTEM_PROMPT, OUTCOME_TEXT, VERDICT_REQUEST, renderChallengeInput, renderRun } from "./prompt.js";
+import { CHALLENGER_SYSTEM_PROMPT, NO_COUNTER_TEST_NUDGE, OUTCOME_TEXT, VERDICT_REQUEST, renderChallengeInput, renderRun } from "./prompt.js";
 
 export const MAX_COUNTER_TESTS = 4;
 export const MAX_CHALLENGER_TOOL_CALLS = 10;
@@ -124,6 +124,7 @@ export async function challenge(input: ChallengeInput, deps: ChallengeDeps): Pro
     let previousInteractionId: string | undefined;
     let toolCalls = 0;
     let counterTests = 0;
+    let nudged = false;
     let pending: InputItem[] = [];
 
     // Attack: tools only, until the model stops calling them or the budget runs out.
@@ -138,7 +139,15 @@ export async function challenge(input: ChallengeInput, deps: ChallengeDeps): Pro
       });
       interactionIds.push(response.interactionId);
       previousInteractionId = response.interactionId;
-      if (response.functionCalls.length === 0) break;
+      if (response.functionCalls.length === 0) {
+        // Opinions don't count toward "confirmed": give one chance to attack with code first.
+        if (runs.length === 0 && !nudged && counterTests < maxCounterTests && toolCalls < maxToolCalls) {
+          nudged = true;
+          next = [{ type: "text", text: NO_COUNTER_TEST_NUDGE }];
+          continue;
+        }
+        break;
+      }
 
       const results: InputItem[] = [];
       for (const call of response.functionCalls) {
