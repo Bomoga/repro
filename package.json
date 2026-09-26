@@ -1,0 +1,14 @@
+{
+  "name": "repro",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @repro/contracts && npm run build --workspace @repro/api && npm run build --workspace @repro/cli",
+    "dev": "npm run dev --workspace @repro/api",
+    "status": "npm run status --workspace @repro/cli",
+    "web": "npm run dev --workspace @repro/web"
+  }
+}
