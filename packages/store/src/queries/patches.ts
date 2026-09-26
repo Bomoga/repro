@@ -50,6 +50,21 @@ export interface ListPatchesQuery {
   status?: PatchStatus | PatchStatus[];
 }
 
+// What Verify records on a proposed Patch: the Challenger's verdict, plus the deterministic results
+// it re-confirmed (section 4: `reproductionOutputAfter` is captured by Repair and re-confirmed by
+// Verify). Fields left out keep what Repair stored.
+const PatchVerificationSchema = PatchSchema.pick({
+  challengerVerdict: true,
+  challengerNotes: true,
+  testsPassed: true,
+  originalFindingReproduces: true,
+  reproductionOutputAfter: true,
+  regressionFindings: true,
+}).partial({ testsPassed: true, originalFindingReproduces: true, regressionFindings: true });
+
+export type PatchVerification = Pick<Patch, "challengerVerdict"> &
+  Partial<Pick<Patch, "challengerNotes" | "testsPassed" | "originalFindingReproduces" | "reproductionOutputAfter" | "regressionFindings">>;
+
 export function patchQueries(models: StoreModels) {
   const { Patch: PatchModel, Diagnosis: DiagnosisModel, Run: RunModel } = models;
 
@@ -155,6 +170,20 @@ export function patchQueries(models: StoreModels) {
       const current = await load(id);
       if (!from.includes(current.status)) throw new InvalidPatchTransitionError(id, current.status, to);
       throw new GateNotSatisfiedError(id, gateFailures(current));
+    },
+
+    /**
+     * Records the Verification / Challenger Gate's inputs on a Patch that is still proposed. It
+     * never changes `status`: the gate itself is `transition(id, "verified" | "rejected")`, which
+     * re-checks these fields in the same atomic update.
+     */
+    async recordVerification(id: string, verification: PatchVerification): Promise<Patch> {
+      const parsed = PatchVerificationSchema.parse(verification);
+      const set = Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined));
+      const doc = await PatchModel.findOneAndUpdate({ id, status: "proposed" }, { $set: set }, { returnDocument: "after" }).lean();
+      if (doc) return PatchSchema.parse(doc);
+      const current = await load(id);
+      throw new StoreError(`patch ${id} is ${current.status}; only a proposed patch can record a verification`);
     },
 
     /** Records the PR opened for a verified Patch. */

@@ -64,7 +64,7 @@ const entries = await store.logs.list(run.id);
 | Collection | Helper | Notes |
 |---|---|---|
 | runs | `create`, `insert`, `get`, `list({ status, stage, limit })` | `create` starts a Run at `ingest`/`queued` with `logRef` set; lists are newest first |
-| runs | `claimNextQueued()` | Atomic, so two orchestrators polling at once never claim the same Run |
+| runs | `claimNextQueued()`, `claim(id)` | Atomic queued -> running, so two orchestrators never claim the same Run; `claim` returns null unless that Run is queued |
 | runs | `setStage`, `setStatus`, `complete`, `fail` | Only while queued, running, or blocked; a finished Run never changes |
 | findings | `insert(runId, findings)`, `get`, `getMany`, `list(runId, filters)` | Filters: `reproducible`, `detectorId`, `severity`, `category`; file order |
 | findings | `markReproducible(id, reproductionOutput?)`, `counts(runId)` | The output is stored with the flip and never edited; `counts` gives `{ total, reproducible }`, demo beat 2's two numbers |
