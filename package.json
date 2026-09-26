@@ -1,24 +1,21 @@
 {
-  "name": "repro-monorepo",
-  "version": "0.1.0",
+  "name": "repro",
   "private": true,
+  "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "turbo build",
-    "test": "turbo test",
-    "dev": "turbo dev",
-    "lint": "turbo lint",
-    "type-check": "turbo type-check"
-  },
-  "devDependencies": {
-    "turbo": "^2.0.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.0.0",
-    "@types/node": "^20.0.0"
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }
