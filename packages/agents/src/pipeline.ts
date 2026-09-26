@@ -117,7 +117,8 @@ function describeDispute(challenged: ChallengeResult, broke: CounterTest[]): str
   const sections = [`The Challenger disputed the previous patch:\n${challenged.patch.challengerNotes ?? ""}`];
   for (const test of broke) {
     sections.push(
-      `This counter-test still failed on the patched tree; it will be run again against your new patch, which must make it pass:\n` +
+      `This counter-test still failed on the patched tree. It will be run again against your new patch, which must pass it by fixing ` +
+        `the behaviour it checks for every caller, not by recognising the test:\n` +
         `path: ${test.path}\ncommand: ${test.command}\n${test.code}`,
     );
   }
