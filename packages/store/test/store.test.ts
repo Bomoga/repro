@@ -277,11 +277,19 @@ describe("patches", () => {
     const run = await seeded();
     const regressed = patch("p1", "d1", {
       testsPassed: false,
-      regressionFindings: [finding("r1", { reproductionCommand: undefined })],
+      reproductionOutputAfter: "src/db.js:10 still matches",
+      regressionFindings: [finding("r1", { reproducible: true, reproductionOutput: "1 result" })],
       challengerNotes: "counter-test fails before and after",
       status: "rejected",
     });
     expect(await store.patches.insert(run.id, regressed)).toEqual(regressed);
+  });
+
+  it("keeps a finding's reproduction output", async () => {
+    const run = await newRun();
+    const confirmed = finding("f1", { reproducible: true, reproductionOutput: "src/db.js:10: rule matched" });
+    await store.findings.insert(run.id, [confirmed]);
+    expect(await store.findings.get("f1")).toEqual(confirmed);
   });
 
   it("moves proposed -> verified -> merged, and refuses everything else", async () => {
