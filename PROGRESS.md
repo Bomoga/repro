@@ -3,11 +3,10 @@
 One line per session: what was done, what's next.
 
 - 2026-09-26 s1: built `@repro/agents` (packages/agents): Gemini wrapper, secret-redacting workspace access, Diagnose (passes real-API integration), Repair loop, Challenger with counter-tests, gate, and the 2-attempt repair-and-verify loop; 71 unit tests green. Stopped at the usage limit.
-- 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Next: once Lane 2's work is on main, merge it into `lane-3`, swap `src/contracts.ts` for `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
+- 2026-09-26 s2: after credits were added, every real-API test passes (`npm run test:integration`): Repair fixes the SQL injection and moves the hardcoded key to the environment; the Challenger on `gemini-3.1-pro-preview` disputes the detector-fooling fix and confirms the sound one; Diagnose → Repair → Challenger → gate verifies end to end (~2.7 min, 19 calls). Switched the Executor to `exec()`. Merged `lane-3` into main (PR #1, merge commit). Next: once Lane 2's work is on main, merge main into `lane-3`, swap `src/contracts.ts` for `@repro/contracts`, join the npm workspace, and run Repair/Challenger through Lane 2's DockerExecutor.
 
 ## Blocked
 
-- **Merging to main (needs tooling):** `lane-3` is pushed and green, but this machine has no `gh` and the browser pane isn't signed in to GitHub, so no PR was opened. A title-only PR `lane-3` → `main` is ready; nothing in it touches `@repro/contracts`.
 - **Real sandbox (needs Lane 2 on main, then Docker):** counter-tests and tests only get truly judged by executing them in Lane 2's DockerExecutor (`packages/executor` on `lane-2`, image built from `sandbox/Dockerfile`). Until then, integration tests answer commands with oracles and never execute model code on the host. The Docker daemon isn't running on this machine and the image hasn't been built (the build downloads base images, Semgrep, and rule packs).
 
 ## Needs a contracts decision
