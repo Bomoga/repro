@@ -11,6 +11,12 @@ describe("extractSecrets", () => {
     expect(extractSecrets(line, "OPENAI_API_KEY: 'REDACTED'")).toEqual([PLANTED_SECRET]);
   });
 
+  it("handles Python assignments and gitleaks' generic key = value matches", () => {
+    const secret = "9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d1c";
+    expect(extractSecrets(`OPENAI_API_KEY = "sk-live-${secret}"`, 'OPENAI_API_KEY = "REDACTED"')).toEqual([`sk-live-${secret}`]);
+    expect(extractSecrets(`    token=${secret}  # rotate me`, "token=REDACTED")).toEqual([secret]);
+  });
+
   it("returns undefined when the evidence has no redaction marker or doesn't match", () => {
     expect(extractSecrets("token = abcdefghijkl", "token = abcdefghijkl")).toBeUndefined();
     expect(extractSecrets("something else entirely", "api_key = 'REDACTED'")).toBeUndefined();
