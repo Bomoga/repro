@@ -1,0 +1,6 @@
+# Repro's gitleaks config. Passed explicitly with --config so a target repo's own .gitleaks.toml
+# (untrusted, section 9) can't allowlist its way out of detection.
+title = "repro"
+
+[extend]
+useDefault = true

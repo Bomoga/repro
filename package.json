@@ -8,7 +8,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sandbox:build": "docker build -t repro-sandbox:dev sandbox",
+    "test:rules": "semgrep scan --test --metrics=off --disable-version-check sandbox/rules/privacy-patterns"
   },
   "engines": {
     "node": ">=18"
