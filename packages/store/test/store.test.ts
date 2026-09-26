@@ -13,6 +13,7 @@ import {
   InvalidPatchTransitionError,
   NotReproducibleError,
   openConnection,
+  PatchNotFoundError,
   RunNotActiveError,
   RunNotFoundError,
   StoreConnectionError,
@@ -207,6 +208,15 @@ describe("findings", () => {
     expect((await store.findings.list(run.id, { reproducible: false })).map((f) => f.id)).toEqual(["nocmd"]);
   });
 
+  it("stores the reproduction output with the flip, and never edits it afterward", async () => {
+    const run = await newRun();
+    await store.findings.insert(run.id, [finding("f1")]);
+    const output = "REPRODUCED sql injection at src/db.js:10-12";
+    expect(await store.findings.markReproducible("f1", output)).toEqual({ ...finding("f1"), reproducible: true, reproductionOutput: output });
+    expect((await store.findings.markReproducible("f1", "edited later")).reproductionOutput).toBe(output);
+    expect((await store.findings.get("f1"))?.reproductionOutput).toBe(output);
+  });
+
   it("throws on a field the schema doesn't know, instead of dropping it", async () => {
     const run = await newRun();
     await expect(store.models.Finding.create({ ...finding("f1"), runId: run.id, surprise: true })).rejects.toThrow(/not in schema/);
@@ -282,6 +292,26 @@ describe("patches", () => {
     await expect(store.patches.transition("p1", "rejected")).rejects.toThrow(InvalidPatchTransitionError);
     await expect(store.patches.transition("p1", "merged")).rejects.toThrow(InvalidPatchTransitionError);
     await expect(store.patches.transition("p1", "proposed")).rejects.toThrow(InvalidPatchTransitionError);
+  });
+
+  it("replaces a patch as Repair and the gate refine it, moving its status only forward", async () => {
+    const run = await seeded();
+    await store.patches.insert(run.id, patch("p1", "d1", { challengerVerdict: "disputed", challengerNotes: "Not yet challenged." }));
+    const confirmed = patch("p1", "d1", { challengerNotes: "counter-test fails before, passes after" });
+    expect(await store.patches.replace(run.id, confirmed)).toEqual(confirmed);
+    const verified = { ...confirmed, status: "verified" as const };
+    expect(await store.patches.replace(run.id, verified)).toEqual(verified);
+    const { challengerNotes: _cleared, ...withoutNotes } = verified;
+    expect(await store.patches.replace(run.id, withoutNotes)).toEqual(withoutNotes);
+
+    await expect(store.patches.replace(run.id, { ...withoutNotes, status: "proposed" })).rejects.toThrow(InvalidPatchTransitionError);
+    await expect(store.patches.replace(run.id, { ...withoutNotes, status: "merged" })).rejects.toThrow(/human/);
+    await expect(store.patches.replace(run.id, { ...withoutNotes, challengerVerdict: "disputed" })).rejects.toThrow(GateNotSatisfiedError);
+    await expect(store.patches.replace((await newRun()).id, withoutNotes)).rejects.toThrow(/another run/);
+    await expect(store.patches.replace(run.id, patch("ghost", "d1"))).rejects.toThrow(PatchNotFoundError);
+
+    await store.patches.transition("p1", "merged");
+    await expect(store.patches.replace(run.id, withoutNotes)).rejects.toThrow(InvalidPatchTransitionError);
   });
 
   it("won't verify a patch the gate rejects, and says which checks failed", async () => {
