@@ -1,0 +1,45 @@
+{
+  "name": "@repro/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lane 4: Fastify/tRPC status API over the Run Store (Runs, Findings, Diagnoses, Patches)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./router": {
+      "types": "./dist/router/index.d.ts",
+      "import": "./dist/router/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "@repro/agents": "*",
+    "@repro/contracts": "*",
+    "@trpc/server": "^11.19.0",
+    "fastify": "^5.12.5",
+    "mongoose": "^9.10.2",
+    "@octokit/rest": "^22.0.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@trpc/client": "^11.19.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
