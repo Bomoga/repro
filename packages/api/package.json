@@ -1,0 +1,26 @@
+{
+  "name": "@repro/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@repro/contracts": "*",
+    "@trpc/server": "^11.0.0",
+    "fastify": "^5.2.0",
+    "@fastify/cors": "^10.0.1",
+    "mongoose": "^8.9.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "vitest": "^3.2.7"
+  }
+}
