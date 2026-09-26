@@ -9,13 +9,13 @@ function fakeOctokit(existingCheckRuns: { id: number; external_id: string }[] = 
   return {
     checks: {
       listForRef: vi.fn(async () => ({ data: { check_runs: existingCheckRuns } })),
-      create: vi.fn(async () => ({})),
-      update: vi.fn(async () => ({})),
+      create: vi.fn(async (_params: Record<string, unknown>) => ({})),
+      update: vi.fn(async (_params: Record<string, unknown>) => ({})),
     },
     issues: {
       listComments: vi.fn(async () => ({ data: existingComments })),
-      createComment: vi.fn(async () => ({})),
-      updateComment: vi.fn(async () => ({})),
+      createComment: vi.fn(async (_params: Record<string, unknown>) => ({})),
+      updateComment: vi.fn(async (_params: Record<string, unknown>) => ({})),
     },
   };
 }

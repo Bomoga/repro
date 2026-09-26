@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p packages/web/tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "dev:api": "npm run dev -w @repro/api",
