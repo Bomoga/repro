@@ -41,8 +41,11 @@ export function buildTrustReport(patch: Patch, diagnosis: Diagnosis | undefined,
     reasons.push(`${patch.regressionFindings.length} new regression finding(s) on the patched tree.`);
   }
 
-  if (diagnosis && findings.some((f) => f.severity === "critical" || f.severity === "high")) {
-    reasons.push(`Addresses a ${findings.find((f) => f.severity === "critical") ? "critical" : "high"}-severity finding.`);
+  // Only the Findings this Patch's Diagnosis cites: another Finding in the same run says nothing
+  // about what this Patch addresses.
+  const cited = diagnosis ? findings.filter((f) => diagnosis.findingIds.includes(f.id)) : [];
+  if (cited.some((f) => f.severity === "critical" || f.severity === "high")) {
+    reasons.push(`Addresses a ${cited.some((f) => f.severity === "critical") ? "critical" : "high"}-severity finding.`);
   }
 
   const confidence: TrustReport["confidence"] = score >= 4 ? "high" : score >= 2 ? "medium" : "low";

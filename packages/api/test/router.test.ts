@@ -144,6 +144,19 @@ describe("findings, diagnoses, and patches", () => {
     expect((await mutate("patches.decide", { patchId: "patch_demo_py_sqli_1", decision: "merge" })).status).toBe(409);
     expect((await mutate("patches.decide", { patchId: "nope", decision: "merge" })).status).toBe(404);
   });
+
+  it("builds a Trust Report that only claims what the patch's own Findings show", async () => {
+    const sqli = await query("patches.trustReport", { runId: "run_demo_completed", patchId: "patch_demo_sqli_2" });
+    expect(sqli.body.result.data.confidence).toBe("high");
+    expect(sqli.body.result.data.reasons).toContain("Addresses a high-severity finding.");
+
+    // Same run has a critical gitleaks Finding, but this patch only addresses a medium one.
+    const logging = await query("patches.trustReport", { runId: "run_demo_completed", patchId: "patch_demo_prompt_logging_2" });
+    expect(logging.body.result.data.reasons.join(" ")).not.toMatch(/Addresses a (critical|high)/);
+
+    const disputed = await query("patches.trustReport", { runId: "run_demo_completed", patchId: "patch_demo_sqli_1" });
+    expect(disputed.body.result.data.confidence).toBe("medium");
+  });
 });
 
 describe("transport", () => {
