@@ -34,7 +34,7 @@ describe("cli commands against a real running API", () => {
 
   it("scans, watches to completion, and reports status", async () => {
     lines = [];
-    await runScan(client, io, "main", "github");
+    await runScan(client, io, "octo/example", "github");
     const runId = lines[0]!.match(/Queued (\S+)/)![1]!;
 
     lines = [];
