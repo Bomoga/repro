@@ -31,6 +31,10 @@ function input(overrides: Partial<PullRequestInput> = {}): PullRequestInput {
 describe("pullRequestTitle and pullRequestBody", () => {
   it("titles the PR from the cited rules and the changed files, never from model prose", () => {
     expect(pullRequestTitle(input())).toBe("Repro: fix node-postgres-sqli in src/db.js");
+    const privacy = aFinding("fnd_sqli", { detectorId: "privacy-patterns", ruleId: "privacy.prompt-logging.js", file: "src/assistant.js" });
+    expect(pullRequestTitle(input({ findings: [privacy], patch: aPatch("patch_2", "diag_sqli", { filesChanged: ["src/assistant.js"] }) }))).toBe(
+      "Repro: fix prompt-logging in src/assistant.js",
+    );
   });
 
   it("labels the narration as Gemini's and pastes the proof verbatim", () => {

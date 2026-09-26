@@ -134,9 +134,15 @@ function cited(input: Pick<PullRequestInput, "diagnosis" | "findings">): Finding
   return input.findings.filter((finding) => input.diagnosis.findingIds.includes(finding.id));
 }
 
+/** A rule's short name. Registry rules end in it ("...sqli.node-postgres-sqli"); Lane 2's own
+ *  privacy rules end in their language ("privacy.prompt-logging.js"). */
+function ruleName(ruleId: string): string {
+  return ruleId.replace(/\.(js|jsx|ts|tsx|py)$/, "").split(/[./]/).pop() || ruleId;
+}
+
 /** Deterministic, from the cited rules and the changed files; never model prose. */
 export function pullRequestTitle(input: Pick<PullRequestInput, "patch" | "diagnosis" | "findings">): string {
-  const rules = [...new Set(cited(input).map((finding) => finding.ruleId.split(/[./]/).pop() ?? finding.ruleId))];
+  const rules = [...new Set(cited(input).map((finding) => ruleName(finding.ruleId)))];
   const title = `Repro: fix ${rules.join(", ")} in ${input.patch.filesChanged.join(", ")}`;
   return title.length > 120 ? `${title.slice(0, 117)}...` : title;
 }
