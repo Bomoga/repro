@@ -1,7 +1,13 @@
 export * from "./contracts.js";
 export * from "./gemini.js";
 export * from "./workspace-files.js";
+export * from "./sandbox.js";
 export { diagnose, isRepairEligible, checkDiagnoses } from "./diagnose/diagnose.js";
 export type { DiagnoseInput, DiagnoseDeps, DiagnoseResult, DroppedDiagnosis } from "./diagnose/diagnose.js";
 export { diagnosisOutputSchema } from "./diagnose/schema.js";
 export { DIAGNOSE_SYSTEM_PROMPT } from "./diagnose/prompt.js";
+export { repair, detectTestCommand, MAX_TOOL_CALLS } from "./repair/repair.js";
+export type { RepairInput, RepairDeps, RepairResult, RepairStopReason } from "./repair/repair.js";
+export { REPAIR_TOOLS, type ToolCallRecord } from "./repair/tools.js";
+export { REPAIR_SYSTEM_PROMPT } from "./repair/prompt.js";
+export { findRegressions } from "./repair/regressions.js";

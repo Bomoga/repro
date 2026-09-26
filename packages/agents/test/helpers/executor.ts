@@ -1,0 +1,145 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+import type { DetectorAdapter, ExecRequest, ExecResult, Executor, Finding } from "../../src/contracts.js";
+import { DEMO_TARGET } from "./workspace.js";
+
+export type CommandHandler = (request: ExecRequest) => ExecResult | undefined;
+
+/**
+ * Test double for the sandboxed Executor. Harness-issued `git …` commands run for real against
+ * the throwaway fixture repo the test created (trusted content). Everything else must be
+ * answered by a handler: code a model edited is never executed on the host (section 9), so
+ * tests and detectors are answered by static oracles instead.
+ */
+export class FixtureExecutor implements Executor {
+  readonly requests: ExecRequest[] = [];
+
+  constructor(private readonly handlers: CommandHandler[] = []) {}
+
+  async run(request: ExecRequest): Promise<ExecResult> {
+    this.requests.push(request);
+    for (const handler of this.handlers) {
+      const result = handler(request);
+      if (result) return result;
+    }
+    if (/^git\s/.test(request.command)) return runGit(request);
+    return result(127, "", `FixtureExecutor has no handler for: ${request.command}`);
+  }
+
+  commands(): string[] {
+    return this.requests.map((r) => r.command);
+  }
+}
+
+function runGit(request: ExecRequest): ExecResult {
+  const started = Date.now();
+  try {
+    const stdout = execSync(request.command, {
+      cwd: request.workspacePath,
+      encoding: "utf8",
+      timeout: request.timeoutMs,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { ...result(0, stdout, ""), durationMs: Date.now() - started };
+  } catch (error) {
+    const e = error as { status?: number | null; stdout?: string; stderr?: string; signal?: string | null };
+    return { exitCode: e.status ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? "", timedOut: e.signal === "SIGTERM", durationMs: Date.now() - started };
+  }
+}
+
+export function result(exitCode: number, stdout: string, stderr = ""): ExecResult {
+  return { exitCode, stdout, stderr, timedOut: false, durationMs: 1 };
+}
+
+export function on(pattern: RegExp, answer: (request: ExecRequest) => ExecResult): CommandHandler {
+  return (request) => (pattern.test(request.command) ? answer(request) : undefined);
+}
+
+const read = (workspacePath: string, file: string) => readFileSync(path.join(workspacePath, file), "utf8");
+
+/** Statements that splice a non-literal value into SQL text, roughly what the semgrep rule sees. */
+export function sqlConcatenations(source: string): { line: number; text: string }[] {
+  const hits: { line: number; text: string }[] = [];
+  const lines = source.split("\n");
+  let offset = 0;
+  for (const statement of source.split(";")) {
+    const stripped = statement.replace(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g, '""');
+    const interpolated = /`[^`]*\$\{[^`]*`/.test(statement);
+    const concatenated = /\+\s*[A-Za-z_$(]|[A-Za-z_$)\]]\s*\+/.test(stripped);
+    const keywordAt = statement.search(/\b(SELECT|INSERT|UPDATE|DELETE)\b/i);
+    if (keywordAt >= 0 && (interpolated || concatenated)) {
+      const line = source.slice(0, offset + keywordAt).split("\n").length;
+      hits.push({ line, text: lines[line - 1]!.trim() });
+    }
+    offset += statement.length + 1;
+  }
+  return hits;
+}
+
+/** Oracle for `semgrep … node-postgres-sqli … src/db.js`. */
+export function semgrepSqli(request: ExecRequest): ExecResult {
+  const hits = sqlConcatenations(read(request.workspacePath, "src/db.js"));
+  if (hits.length === 0) return result(0, "Ran 1 rule on 1 file: 0 findings.");
+  const body = hits.map((hit) => `           ${hit.line}┆ ${hit.text.split("\n")[0]}`).join("\n");
+  return result(1, `    src/db.js\n   ❯❯❱ node-postgres-sqli\n${body}\n\nRan 1 rule on 1 file: ${hits.length} findings.`);
+}
+
+/** Oracle for `gitleaks dir src/config.js …`: exit 1 while the planted key is still there. */
+export function gitleaksConfig(secret: string) {
+  return (request: ExecRequest): ExecResult =>
+    read(request.workspacePath, "src/config.js").includes(secret)
+      ? result(1, "Finding:     OPENAI_API_KEY: 'REDACTED'\nSecret:      REDACTED\nRuleID:      generic-api-key\n\nWRN leaks found: 1")
+      : result(0, "INF no leaks found");
+}
+
+/**
+ * Oracle for `npm test`: a structural stand-in for demo-target's test suite. It passes while the
+ * suite's file is untouched and db.js still defines and exports the functions it exercises.
+ */
+export function demoTargetTests(request: ExecRequest): ExecResult {
+  const suite = read(request.workspacePath, "test/db.test.js");
+  if (suite !== readFileSync(path.join(DEMO_TARGET, "test/db.test.js"), "utf8")) {
+    return result(1, "", "test/db.test.js was modified");
+  }
+  const db = read(request.workspacePath, "src/db.js");
+  const names = ["findNotesByOwner", "getNoteById", "deleteNote"];
+  const missing = names.filter((name) => !new RegExp(`function ${name}\\s*\\(|${name}\\s*=`).test(db));
+  const exported = /module\.exports\s*=\s*\{([^}]*)\}/.exec(db)?.[1] ?? "";
+  const unexported = names.filter((name) => !exported.includes(name));
+  if (missing.length > 0 || unexported.length > 0 || !/db\.query\(/.test(db)) {
+    return result(1, "", `db.js no longer defines or exports: ${[...missing, ...unexported].join(", ") || "db.query calls"}`);
+  }
+  return result(0, "# tests 3\n# pass 3\n# fail 0");
+}
+
+export const SEMGREP_COMMAND = /^semgrep .*node-postgres-sqli/;
+export const GITLEAKS_COMMAND = /^gitleaks /;
+
+export function demoTargetHandlers(secret: string): CommandHandler[] {
+  return [on(/^npm test$/, demoTargetTests), on(SEMGREP_COMMAND, semgrepSqli), on(GITLEAKS_COMMAND, gitleaksConfig(secret))];
+}
+
+/** Stand-in for Lane 2's semgrep adapter over demo-target, built on the same oracle. */
+export const fakeSemgrepAdapter: DetectorAdapter = {
+  id: "semgrep",
+  async run(workspace) {
+    const source = read(workspace.path, "src/db.js");
+    return sqlConcatenations(source).map(
+      (hit, i): Finding => ({
+        id: `post-semgrep-${i}`,
+        detectorId: "semgrep",
+        ruleId: "javascript.lang.security.audit.sqli.node-postgres-sqli.node-postgres-sqli",
+        severity: "high",
+        category: "vulnerability",
+        file: "src/db.js",
+        lineStart: hit.line,
+        lineEnd: hit.line,
+        message: "SQL built by concatenation",
+        evidence: hit.text,
+        reproducible: false,
+        createdAt: "2026-09-26T11:00:00.000Z",
+      }),
+    );
+  },
+};
