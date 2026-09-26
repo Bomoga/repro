@@ -93,10 +93,11 @@ export const ExecResultSchema = z.object({
 });
 export type ExecResult = z.infer<typeof ExecResultSchema>;
 
-// Section 4 names `Executor` without spelling out its shape; a single `run` method is this
-// mirror's reading of it (see PROGRESS.md). One ExecResult per ExecRequest, no streaming.
+// Section 4 names `Executor` without spelling out its shape. `exec` matches the contracts
+// package and DockerExecutor Lane 2 wrote (see PROGRESS.md). One ExecResult per ExecRequest,
+// no streaming.
 export interface Executor {
-  run(request: ExecRequest): Promise<ExecResult>;
+  exec(request: ExecRequest): Promise<ExecResult>;
 }
 
 export interface DetectorAdapter {

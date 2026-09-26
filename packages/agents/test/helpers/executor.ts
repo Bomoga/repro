@@ -24,7 +24,7 @@ export class FixtureExecutor implements Executor {
 
   constructor(private readonly handlers: CommandHandler[] = []) {}
 
-  async run(request: ExecRequest): Promise<ExecResult> {
+  async exec(request: ExecRequest): Promise<ExecResult> {
     this.requests.push(request);
     for (const handler of this.handlers) {
       const result = handler(request);

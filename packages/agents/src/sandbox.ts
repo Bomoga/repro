@@ -36,7 +36,7 @@ export class Sandbox {
   }
 
   exec(command: string, timeoutMs: number): Promise<ExecResult> {
-    return this.executor.run({ workspacePath: this.workspace.path, command, timeoutMs });
+    return this.executor.exec({ workspacePath: this.workspace.path, command, timeoutMs });
   }
 
   private async git(args: string, what: string): Promise<string> {
