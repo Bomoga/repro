@@ -6,5 +6,7 @@ export type { Context } from "./trpc.ts";
 export { checkHealth, type Health } from "./health.ts";
 export { targetProblem } from "./targets.ts";
 export { buildTrustReport, type TrustReport } from "./trust.ts";
+export { recordPullRequestClosed, type PullRequestClosed, type PullRequestOutcome } from "./pull-requests.ts";
+export { githubWebhook, validGitHubSignature } from "./github-webhook.ts";
 export { demoRunRecords, importRunRecord, seedDemoData, type RunRecord, type SeedResult } from "./seed.ts";
 export * from "./store/index.ts";

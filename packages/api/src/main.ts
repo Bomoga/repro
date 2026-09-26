@@ -7,6 +7,7 @@ import { openRunStore } from "./store/index.ts";
 //   MONGODB_DB       database name, when the URI doesn't name one
 //   PORT, HOST       listen address (default 0.0.0.0:4000)
 //   REPRO_SEED_DEMO  "1" loads the demo Runs from src/seed.ts at startup (idempotent)
+//   REPRO_GITHUB_WEBHOOK_SECRET  enables POST /github/webhook for repair PRs merged or closed on GitHub
 
 async function main(): Promise<void> {
   const store = await openRunStore();
@@ -15,7 +16,7 @@ async function main(): Promise<void> {
     console.log(`demo data: seeded ${seeded.length} run(s), ${skipped.length} already present`);
   }
 
-  const app = buildApp(store, { logger: true });
+  const app = buildApp(store, { logger: true, githubWebhookSecret: process.env.REPRO_GITHUB_WEBHOOK_SECRET });
   const shutdown = async (signal: string) => {
     app.log.info(`${signal}: shutting down`);
     await app.close();
