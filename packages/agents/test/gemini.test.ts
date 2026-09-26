@@ -76,7 +76,6 @@ describe("createGeminiClient", () => {
     });
     expect(calls[0]!.params).toEqual({
       model: "gemini-3.8-flash",
-      background: true,
       system_instruction: "sys",
       input: [
         { type: "function_result", call_id: "c1", name: "read_file", result: "text" },
@@ -134,26 +133,44 @@ describe("createGeminiClient", () => {
     expect(log.entries[2]!.request.systemInstruction).toBe("s");
   });
 
-  it("polls a background interaction until it leaves the pending states", async () => {
-    const { sdk, polls } = fakeSdk({ id: "int-bg", status: "in_progress", steps: [] });
+  it("spends exactly one request per interaction by default", async () => {
+    const { sdk, calls } = fakeSdk(completed);
+    await createGeminiClient({ sdk, env: {}, timeoutMs: 123_000 }).interact({ role: "diagnose", systemInstruction: "s", input: "i" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.params.background).toBeUndefined();
+    expect(calls[0]!.options).toMatchObject({ maxRetries: 0, timeout: 123_000 });
+    expect(sdk.interactions.get).not.toHaveBeenCalled();
+  });
+
+  it("retries a connection dropped mid-response", async () => {
+    const dropped = Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET", message: "other side closed" } });
+    const { sdk, calls } = fakeSdk(dropped, completed);
+    const response = await createGeminiClient({ sdk, env: {}, sleep: async () => {} }).interact({ role: "diagnose", systemInstruction: "s", input: "i" });
+    expect(response.status).toBe("completed");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("in background transport, polls until the interaction leaves the pending states", async () => {
+    const { sdk, polls, calls } = fakeSdk({ id: "int-bg", status: "in_progress", steps: [] });
     polls.push({ id: "int-bg", status: "queued", steps: [] }, completed);
     const sleeps: number[] = [];
-    const response = await createGeminiClient({ sdk, env: {}, sleep: async (ms) => void sleeps.push(ms) }).interact({
-      role: "diagnose",
-      systemInstruction: "s",
-      input: "i",
-    });
+    const response = await createGeminiClient({
+      sdk,
+      env: { REPRO_GEMINI_TRANSPORT: "background" },
+      sleep: async (ms) => void sleeps.push(ms),
+    }).interact({ role: "diagnose", systemInstruction: "s", input: "i" });
+    expect(calls[0]!.params.background).toBe(true);
     expect(response.status).toBe("completed");
     expect(response.outputText).toBe('{"ok":true}');
     expect(sdk.interactions.get).toHaveBeenCalledTimes(2);
-    expect(sleeps).toEqual([1000, 2000]);
+    expect(sleeps).toEqual([10_000, 10_000]);
   });
 
-  it("rides out a dropped poll and retries a dropped create", async () => {
+  it("in background transport, rides out a dropped poll and retries a dropped create", async () => {
     const dropped = Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET", message: "other side closed" } });
     const { sdk, polls } = fakeSdk(dropped, { id: "int-3", status: "in_progress", steps: [] });
     polls.push(new TypeError("fetch failed"), completed);
-    const response = await createGeminiClient({ sdk, env: {}, sleep: async () => {} }).interact({
+    const response = await createGeminiClient({ sdk, env: {}, transport: "background", sleep: async () => {} }).interact({
       role: "diagnose",
       systemInstruction: "s",
       input: "i",
@@ -164,7 +181,7 @@ describe("createGeminiClient", () => {
 
   it("cancels an interaction that outlives its deadline", async () => {
     const { sdk, cancelled } = fakeSdk({ id: "int-slow", status: "in_progress", steps: [] });
-    const client = createGeminiClient({ sdk, env: {}, timeoutMs: -1, retry: { maxAttempts: 1 }, sleep: async () => {} });
+    const client = createGeminiClient({ sdk, env: {}, transport: "background", timeoutMs: -1, retry: { maxAttempts: 1 }, sleep: async () => {} });
     await expect(client.interact({ role: "diagnose", systemInstruction: "s", input: "i" })).rejects.toMatchObject({
       retryable: true,
       message: expect.stringContaining("did not finish"),
@@ -182,6 +199,18 @@ describe("createGeminiClient", () => {
       retryable: false,
     });
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("reads the API's own message out of the error body to spot a per-day quota", async () => {
+    const generic = Object.assign(new Error('429 API error occurred: {"httpMeta":{}}'), {
+      status: 429,
+      body: JSON.stringify({ error: { message: "Rate limit exceeded for model gemini-3.8-flash (limit: 20 requests per day on Free Tier).", code: "rate_limit_exceeded" } }),
+    });
+    const { sdk, calls } = fakeSdk(generic);
+    await expect(
+      createGeminiClient({ sdk, env: {}, sleep: async () => {} }).interact({ role: "repair", systemInstruction: "s", input: "i" }),
+    ).rejects.toMatchObject({ retryable: false, message: expect.stringContaining("20 requests per day") });
+    expect(calls).toHaveLength(1);
   });
 
   it("does not retry client errors and gives up after maxAttempts", async () => {

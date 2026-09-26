@@ -140,12 +140,21 @@ export interface InteractionsSdk {
   };
 }
 
+/**
+ * "request" (default): one blocking HTTP request per interaction, the cheapest option against
+ * per-day request quotas (the free tier allows 20/day on gemini-3.8-flash). "background":
+ * create in the background and poll, which survives dropped connections on multi-minute calls
+ * but spends extra requests on polls; for billing-linked keys. Set via REPRO_GEMINI_TRANSPORT.
+ */
+export type GeminiTransport = "request" | "background";
+
 export interface GeminiClientOptions {
   apiKey?: string;
   log?: InteractionLog;
   retry?: Partial<RetryPolicy>;
-  /** Deadline for one interaction to finish, polling included. High thinking can take minutes. */
+  /** Deadline for one interaction to finish. High thinking can take minutes. */
   timeoutMs?: number;
+  transport?: GeminiTransport;
   env?: NodeJS.ProcessEnv;
   sdk?: InteractionsSdk;
   sleep?: (ms: number) => Promise<void>;
@@ -155,6 +164,7 @@ export interface GeminiClientOptions {
 // Statuses in which the server is still working on a background interaction.
 const PENDING = new Set(["in_progress", "queued"]);
 const HTTP_TIMEOUT_MS = 60_000;
+const POLL_INTERVAL_MS = 10_000;
 const MAX_CONSECUTIVE_POLL_FAILURES = 5;
 
 export function createGeminiClient(options: GeminiClientOptions = {}): GeminiClient {
@@ -162,6 +172,8 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
   const log = options.log ?? new MemoryInteractionLog();
   const policy = { ...DEFAULT_RETRY, ...options.retry };
   const timeoutMs = options.timeoutMs ?? 600_000;
+  const transport: GeminiTransport =
+    options.transport ?? (env.REPRO_GEMINI_TRANSPORT?.trim() === "background" ? "background" : "request");
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => new Date());
   let sdk = options.sdk;
@@ -186,22 +198,20 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return sdk;
   };
 
-  /**
-   * Runs one interaction in the background and polls it to completion, so a long thinking
-   * phase never holds a single HTTP connection open (those get dropped mid-response).
-   */
+  /** Runs one interaction to completion with the configured transport. */
   const runOnce = async (params: Record<string, unknown>): Promise<unknown> => {
     const api = getSdk().interactions;
+    if (transport === "request") return api.create(params, { maxRetries: 0, timeout: timeoutMs });
     const deadline = Date.now() + timeoutMs;
-    let raw = await api.create(params, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
+    let raw = await api.create({ ...params, background: true }, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
     let pollFailures = 0;
-    for (let poll = 1; PENDING.has(statusOf(raw)); poll++) {
+    while (PENDING.has(statusOf(raw))) {
       if (Date.now() > deadline) {
         const id = idOf(raw);
         await api.cancel?.(id).catch(() => undefined);
         throw new GeminiError(`interaction ${id} did not finish within ${timeoutMs}ms`, undefined, true);
       }
-      await sleep(Math.min(5_000, 1_000 * poll));
+      await sleep(POLL_INTERVAL_MS);
       try {
         raw = await api.get(idOf(raw), undefined, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
         pollFailures = 0;
@@ -265,7 +275,6 @@ function idOf(raw: unknown): string {
 function buildParams(request: InteractRequest, model: string): Record<string, unknown> {
   const params: Record<string, unknown> = {
     model,
-    background: true,
     system_instruction: request.systemInstruction,
     input: toSdkInput(request.input),
     generation_config: { thinking_level: ROLE_CONFIG[request.role].thinking },
@@ -356,9 +365,9 @@ function lastModelText(steps: RawStep[]): string {
 }
 
 function classify(error: unknown): GeminiError {
-  const e = (error ?? {}) as { status?: unknown; code?: unknown; message?: unknown; cause?: unknown };
+  const e = (error ?? {}) as { status?: unknown; code?: unknown; message?: unknown; cause?: unknown; body?: unknown; error?: unknown };
   const status = typeof e.status === "number" ? e.status : typeof e.code === "number" ? e.code : undefined;
-  const message = typeof e.message === "string" ? e.message : String(error);
+  const message = [typeof e.message === "string" ? e.message : String(error), apiErrorDetail(e)].filter(Boolean).join(": ");
   if (status === 429) {
     // A per-day quota (including a limit of zero on the free tier) won't recover inside any
     // backoff window; fail fast so the caller can switch models instead of waiting.
@@ -370,6 +379,24 @@ function classify(error: unknown): GeminiError {
   const transient =
     /fetch failed|terminated|other side closed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR|socket hang up|timed? ?out/i.test(detail);
   return new GeminiError(message, undefined, transient);
+}
+
+/** The API's own error text, which the SDK keeps in the body rather than in `message`. */
+function apiErrorDetail(e: { body?: unknown; error?: unknown; cause?: unknown; message?: unknown }): string {
+  const candidates: unknown[] = [e.body, e.error, (e.cause as { body?: unknown } | undefined)?.body, (e.cause as { error?: unknown } | undefined)?.error];
+  for (const candidate of candidates) {
+    let value = candidate;
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        continue;
+      }
+    }
+    const detail = (value as { error?: { message?: unknown } } | undefined)?.error?.message;
+    if (typeof detail === "string" && detail && !String(e.message ?? "").includes(detail)) return detail;
+  }
+  return "";
 }
 
 function backoffMs(attempt: number, message: string, policy: RetryPolicy): number {
