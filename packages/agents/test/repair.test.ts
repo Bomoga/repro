@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PatchSchema, type DetectorAdapter, type Finding } from "../src/contracts.js";
@@ -247,5 +248,30 @@ describe("repair", () => {
   it("detects a package.json test script as the test command", async () => {
     const files = await WorkspaceFiles.open(fixture.workspace, []);
     expect(await detectTestCommand(files)).toBe("npm test");
+  });
+});
+
+describe("detectTestCommand", () => {
+  const detect = async (fileIndex: string[], packageJson?: string) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "repro-detect-"));
+    try {
+      if (packageJson !== undefined) writeFileSync(path.join(dir, "package.json"), packageJson);
+      const workspace = { runId: "r", path: dir, fileIndex, languages: [], headCommit: "0".repeat(40) };
+      return await detectTestCommand(await WorkspaceFiles.open(workspace, []));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("finds a pytest suite in a Python target", async () => {
+    expect(await detect(["app/jobs.py", "tests/test_jobs.py"])).toBe("python -m pytest -q");
+    expect(await detect(["app/jobs.py", "conftest.py"])).toBe("python -m pytest -q");
+    expect(await detect(["app/jobs.py", "app/test_jobs.py"])).toBe("python -m pytest -q");
+  });
+
+  it("finds nothing when there's no suite, so testsPassed stays false and the gate can't verify", async () => {
+    expect(await detect(["app/jobs.py", "assistant/memory.py"])).toBeUndefined();
+    expect(await detect(["package.json", "index.js"], JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }))).toBeUndefined();
+    expect(await detect(["package.json", "index.js"], "{ not json")).toBeUndefined();
   });
 });
