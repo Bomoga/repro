@@ -63,13 +63,38 @@ The underlying capability is general-purpose: grounded evidence about whether co
 6. Read section 4 (the contracts) before writing anything. It's the one file every lane depends on.
 7. Confirm which lane you're on (section 11) and start there. Nobody installs a database locally, Lane 1 stands up one shared MongoDB Atlas cluster (section 10) and hands out a connection string.
 
+### Repo layout and commands
+
+An npm workspace (`packages/*`), ESM, TypeScript on a shared `tsconfig.base.json`. Each package's lane owns it (section 11):
+
+| Package | Lane | What it holds |
+|---|---|---|
+| `@repro/contracts` | 1 | The section 4 Zod schemas and inferred types. Protected path (section 9). |
+| `@repro/ingest` | 2 | Repo Adapter, producing a `Workspace` |
+| `@repro/executor` | 2 | `DockerExecutor`, the sandboxed `exec(request)` |
+| `@repro/detect` | 2 | Semgrep, gitleaks, and `privacy-patterns` adapters, the Detection Engine, the reproduction step |
+| `@repro/agents` | 3 | The Gemini wrapper (`src/gemini.ts`), Diagnose, Repair, the Challenger, the gate |
+| `@repro/api`, `@repro/cli`, `@repro/web` | 4 | The status surface (section 7) |
+
+Outside `packages/`: `sandbox/` is the Docker image the Executor runs, plus the privacy-patterns Semgrep rules; `scripts/` holds one-off runners; `PROGRESS.md` is the running session log, one line per session.
+
+| Command | Does |
+|---|---|
+| `npm install` | Installs every workspace |
+| `npm run build` | Type-checks the root project; `web` and `cli` are excluded and build on their own (`npm run build -w @repro/web`, `-w @repro/cli`) |
+| `npm test` | Unit tests across the workspace (Vitest). Never hits the real Gemini API. |
+| `npm run test:integration -w @repro/agents` | Real-API tests (`*.int.ts`); needs `GEMINI_API_KEY`, and the sandbox tests need the image built |
+| `npm run sandbox:build` | Builds the `repro-sandbox:dev` image |
+| `npm run test:rules` | Semgrep's own tests for the privacy-patterns rules |
+| `npm run dev` / `npm run status` / `npm run web` | API server / `repro status` / dashboard dev server |
+
 ## 3. System architecture
 
 One control plane sits at the center: a Run Orchestrator that owns the idea of a "run" and moves it through five stages. The CLI, the web dashboard, the detectors, and the agents are all either clients of that control plane or workers it calls. Nothing talks to another module directly; everything goes through the contracts in section 4. Gemini sits outside the system as the reasoning engine the agentic stages call; Detect never calls it, and neither does anything else. A human sits at the other end of the diagram on purpose too: the only actor who can merge a repair PR (section 9).
 
 ```mermaid
 flowchart TD
-    CLI["CLI — repro scan / watch / status / ask"]
+    CLI["CLI — repro scan / watch / status"]
     WEB["Web Dashboard"]
     API["Control Plane API"]
     ORCH["Run Orchestrator"]
@@ -80,6 +105,7 @@ flowchart TD
     REPAIR["Autonomous Repair Agent"]
     VER["Verification / Challenger Gate"]
     PR["Pull Request"]
+    EXEC[["Executor<br/>(sandboxed container)"]]
     GEM{{"Gemini API"}}
 
     CLI --> API
@@ -94,6 +120,10 @@ flowchart TD
     VER -->|verified| PR
     VER -->|rejected, retry| DIAG
     PR --> STORE
+
+    DET -.-> EXEC
+    REPAIR -.-> EXEC
+    VER -.-> EXEC
 
     DIAG -.-> GEM
     REPAIR -.-> GEM
@@ -268,41 +298,34 @@ On Gemini:
 ```ts
 import { GoogleGenAI } from "@google/genai";
 import * as z from "zod";
+import { DiagnosisSchema } from "@repro/contracts";
 
 const client = new GoogleGenAI({}); // reads GEMINI_API_KEY
 
-// Built per call: findingIds can only be IDs that are actually in this batch.
-function diagnosisResponseSchema(batchIds: string[]) {
-  return {
-    type: "object",
-    properties: {
-      diagnoses: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            findingIds: { type: "array", items: { type: "string", enum: batchIds } },
-            rootCause: { type: "string" },
-            proposedStrategy: { type: "string" },
-            riskNotes: { type: "string" },
-          },
-          required: ["findingIds", "rootCause", "proposedStrategy", "riskNotes"],
-        },
-      },
-    },
-    required: ["diagnoses"],
-  };
+// Built per call from the Zod contract, so the schema Gemini sees can't drift from section 4:
+// findingIds can only be IDs that are actually in this batch.
+function diagnosisOutputSchema(batchIds: [string, ...string[]]) {
+  return z.object({
+    diagnoses: z.array(
+      z.object({
+        findingIds: z.array(z.enum(batchIds)).min(1),
+        rootCause: DiagnosisSchema.shape.rootCause,
+        proposedStrategy: DiagnosisSchema.shape.proposedStrategy,
+        riskNotes: DiagnosisSchema.shape.riskNotes,
+      }),
+    ).min(1),
+  });
 }
 
-const schema = diagnosisResponseSchema(batch.map((f) => f.id));
+const output = diagnosisOutputSchema(batch.map((f) => f.id) as [string, ...string[]]);
 const interaction = await client.interactions.create({
   model: process.env.REPRO_MODEL_DIAGNOSE ?? "gemini-3.1-pro-preview",
   system_instruction: DIAGNOSE_SYSTEM_PROMPT,
   input: renderDiagnosePrompt(batch, codeContext),
   generation_config: { thinking_level: "high" },
-  response_format: { type: "text", mime_type: "application/json", schema },
+  response_format: { type: "text", mime_type: "application/json", schema: z.toJSONSchema(output) },
 });
-const { diagnoses } = z.fromJSONSchema(schema).parse(JSON.parse(interaction.output_text));
+const { diagnoses } = output.parse(JSON.parse(interaction.output_text)); // the same schema validates
 ```
 
 **Repair.** The repair agent takes a Diagnosis, generates a patch, applies it inside the sandboxed workspace, and runs the project's own test command plus a re-run of the specific detector and reproduction command that raised the original Finding, keeping that re-run's output as `reproductionOutputAfter` if the field is adopted.
@@ -346,11 +369,11 @@ Setup: open Cowork on desktop, turn on Dispatch, follow the prompts for file acc
 
 This governs how Claude Code commits, pushes, and merges while building Repro itself. Section 9's stricter rule, a human always merges, still governs Repro's own product behavior against target and demo repos, unchanged. Two different repos, two different stakes, two different rules.
 
-**Committing.** One logical change per commit; if a change can't be described in one sentence, it's two commits. Message format: `<lane>: <what changed>`, lowercase, imperative mood, no period, for example `lane-2: wrap gitleaks output as Finding[]`. No commit lands with failing tests or a broken build, a commit is a checkpoint, not a work-in-progress marker. Never commit directly to `main`; every commit lands on that lane's own branch, or a short-lived sub-branch off it.
+**Committing.** One logical change per commit; if a change can't be described in one sentence, it's two commits. Message format: `<lane>: <what changed>`, lowercase, imperative mood, no period, for example `lane-2: wrap gitleaks output as Finding[]`. A change that belongs to no single lane uses `repo:` (root tooling, workspace config, CI) or `docs:` (this file, `PROGRESS.md`) as its prefix instead, same format otherwise. Never commit `node_modules/`, `dist/`, `.env` files, or other build output; they were committed early on and had to be untracked on `main`, so check `git status` before every commit and don't `git add -f` past `.gitignore`. No commit lands with failing tests or a broken build, a commit is a checkpoint, not a work-in-progress marker. Never commit directly to `main`; every commit lands on that lane's own branch, or a short-lived sub-branch off it.
 
 **Pushing.** Push after every commit that leaves the branch in a working state, don't batch a day's work into one push at the end. Push only to the lane's own branch or a sub-branch of it, never to `main` directly, from any lane, ever. A push that would force-overwrite another session's unmerged work on the same branch stops and flags it in the Dispatch thread rather than resolving it unilaterally.
 
-**Branches.** Each lane owns exactly one long-lived branch, named `lane-1` through `lane-4`, matching its commit message prefix. Default to committing directly on it; spin up a short-lived sub-branch, named `lane-N/<short-topic>`, only for something risky enough that it shouldn't land on shared lane history until it's working, and merge that back into the lane branch, never straight to `main`, the moment it's done, then delete it. Sync a lane branch against `main` by merging `main` in, never by rebasing, rebasing means force-pushing history another session might already be working from, which the push rule above already rules out. If that merge doesn't resolve cleanly, stop and flag it in the Dispatch thread rather than resolving it unilaterally, same as a conflicting push.
+**Branches.** Each lane owns exactly one long-lived branch, named `lane-1` through `lane-4`, matching its commit message prefix. Default to committing directly on it; spin up a short-lived sub-branch, named `lane-N/<short-topic>`, only for something risky enough that it shouldn't land on shared lane history until it's working, and merge that back into the lane branch, never straight to `main`, the moment it's done, then delete it. Cross-lane `repo:` or `docs:` changes go on a short-lived `docs/<topic>` or `repo/<topic>` branch off `main`. Any other branch name (`lane_four_features`, `lane-4-fallback`, and the like) is non-conforming: don't create one, and if you find one, flag it in the Dispatch thread so its owner renames it or merges it into their lane branch and deletes it, rather than building on it. Sync a lane branch against `main` by merging `main` in, never by rebasing, rebasing means force-pushing history another session might already be working from, which the push rule above already rules out. If that merge doesn't resolve cleanly, stop and flag it in the Dispatch thread rather than resolving it unilaterally, same as a conflicting push.
 
 **Cadence.** Commit and push at least once per hour of active work, and immediately after completing any unit of work that leaves things in a working state, whichever comes first. Long silent stretches followed by one large commit are exactly what makes remote supervision pointless, there's nothing to react to until it's already big. Follow this cadence without being asked each time; it's a standing rule, not a per-task instruction.
 
@@ -370,7 +393,7 @@ One exception to all of that: the Trust Report view from the Assurant challenge 
 
 ## 8. Adapting to challenges
 
-Two of the four sponsor challenges below are additive; two are foundational. None needed a bolt-on. What "modular" actually means for Repro isn't a plugin system sitting beside the real architecture, it's that the real architecture already has enough genuine extension points that a new challenge usually lands as an ordinary addition to something that already exists, not a special case kept at arm's length from it.
+Four sponsor challenges are revealed so far: Assurant (additive), Gemini (foundational, plus one additive feature), and the Microsoft challenge (a set of constraints) are below; MongoDB Atlas (foundational) is covered in section 10. None needed a bolt-on. What "modular" actually means for Repro isn't a plugin system sitting beside the real architecture, it's that the real architecture already has enough genuine extension points that a new challenge usually lands as an ordinary addition to something that already exists, not a special case kept at arm's length from it.
 
 - **A new kind of finding** goes to lane 2, another `DetectorAdapter` in the same set Semgrep and gitleaks already belong to (section 4). Nothing about the Detection Engine or the Finding contract changes to accommodate one, that's what the contract was already for.
 - **A new kind of reasoning about a finding** goes to lane 3, part of how Diagnose actually thinks, not a toggle sitting outside it. Assurant's trust framing isn't a switch Diagnose flips for some findings, it's simply what Diagnose does when a finding calls for explaining a consequence to someone who isn't a developer.
