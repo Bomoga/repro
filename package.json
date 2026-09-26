@@ -1,6 +1,7 @@
 {
   "name": "repro",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
   "workspaces": [
     "packages/*"
@@ -9,6 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
+    "dev": "npm run dev --workspace @repro/api",
+    "status": "npm run status --workspace @repro/cli",
+    "web": "npm run dev --workspace @repro/web",
     "sandbox:build": "docker build -t repro-sandbox:dev sandbox",
     "test:rules": "semgrep scan --test --metrics=off --disable-version-check sandbox/rules/privacy-patterns",
     "scan:lane2": "tsx scripts/lane2-scan.ts"
