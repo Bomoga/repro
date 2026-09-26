@@ -16,3 +16,7 @@ export const oauthConfig = {
   clientId: "assistant-web",
   scopes: ["https://www.googleapis.com/auth/drive"],
 };
+
+export function trackSubmit(analytics: { track(event: string, props: object): void }, prompt: string) {
+  analytics.track("Prompt Submitted", { prompt, model: "gemini" });
+}

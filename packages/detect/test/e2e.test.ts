@@ -43,7 +43,7 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
     const byDetector = (id: string) => findings.filter((f) => f.detectorId === id).length;
     expect(byDetector("semgrep")).toBe(4);
     expect(byDetector("gitleaks")).toBe(1);
-    expect(byDetector("privacy-patterns")).toBe(6);
+    expect(byDetector("privacy-patterns")).toBe(7);
     // Advisory counts depend on the image's OSV snapshot, so pin the two seeded ones, not a total.
     expect(findings.filter((f) => f.detectorId === "osv-scanner").map((f) => `${f.file}:${f.ruleId}`)).toEqual(
       expect.arrayContaining(["package-lock.json:GHSA-xvch-5gv4-984h", "requirements.txt:GHSA-8q59-q68h-6hv4"]),
