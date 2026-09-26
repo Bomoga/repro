@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "scripts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "packages/*/test/fixtures",
+    // Lane 4 packages with their own tsconfig and build: web (JSX, `vite build`) and cli
+    // (`npm run build --workspace @repro/cli`).
+    "packages/web",
+    "packages/cli"
+  ]
+}

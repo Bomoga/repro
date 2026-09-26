@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Re-run exactly one Semgrep rule against exactly one file.
+
+Usage: repro-semgrep-rule <pack> <rule-id> <file>
+
+This is the reproductionCommand for every Semgrep-backed Finding (packs: registry,
+privacy-patterns). It is line-agnostic on purpose: Repair and the Challenger re-run the same
+command after a patch has shifted lines, and "the rule still fires anywhere in this file" is the
+conservative answer to "does it still reproduce".
+
+Output protocol, shared with repro-gitleaks-rule:
+  exit 1  one "REPRODUCED ..." line per match     the issue is present
+  exit 0  one "NOT REPRODUCED ..." line           the issue is absent
+  exit 2  reason on stderr                         could not decide; never counts either way
+
+Only locations and rule-authored messages are printed, never matched source text, so nothing
+the target repo contains (secrets included) is echoed into reproduction output.
+"""
+import json
+import os
+import subprocess
+import sys
+
+RULES_BY_ID = "/opt/repro/rules/by-id"
+
+
+def fail(msg: str) -> None:
+    print(f"repro-semgrep-rule: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def main() -> None:
+    if len(sys.argv) != 4:
+        fail("usage: repro-semgrep-rule <pack> <rule-id> <file>")
+    pack, rule_id, target = sys.argv[1:]
+    rule_file = os.path.join(RULES_BY_ID, pack, f"{rule_id}.yml")
+    if os.path.sep in rule_id or not os.path.isfile(rule_file):
+        fail(f"unknown rule {rule_id!r} in pack {pack!r}")
+    if not os.path.isfile(target):
+        # A patch that deletes the file removes the match along with it.
+        print(f"NOT REPRODUCED semgrep {rule_id} in {target}: file no longer exists")
+        sys.exit(0)
+
+    proc = subprocess.run(
+        [
+            "semgrep", "scan",
+            "--config", rule_file,
+            "--json", "--quiet",
+            "--metrics=off", "--disable-version-check",
+            "--disable-nosem", "--x-ignore-semgrepignore-files",
+            "--", target,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        report = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        fail(f"semgrep exited {proc.returncode} without a JSON report: {proc.stderr[-2000:]}")
+    errors = [e for e in report.get("errors", []) if e.get("level") == "error"]
+    if errors:
+        fail(f"semgrep reported errors: {json.dumps(errors)[:2000]}")
+
+    results = report.get("results", [])
+    for r in results:
+        message = " ".join(r["extra"]["message"].split())[:300]
+        print(f"REPRODUCED semgrep {rule_id} at {r['path']}:{r['start']['line']}-{r['end']['line']}: {message}")
+    if results:
+        sys.exit(1)
+    print(f"NOT REPRODUCED semgrep {rule_id} in {target}")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

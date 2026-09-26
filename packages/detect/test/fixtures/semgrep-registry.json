@@ -1,0 +1,225 @@
+{
+ "results": [
+  {
+   "check_id": "opt.repro.rules.registry.python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+   "path": "app/jobs.py",
+   "start": {
+    "line": 5,
+    "col": 55,
+    "offset": 90
+   },
+   "end": {
+    "line": 5,
+    "col": 59,
+    "offset": 94
+   },
+   "extra": {
+    "message": "Found 'subprocess' function 'call' with 'shell=True'. This is dangerous because this call will spawn the command using a shell process. Doing so propagates current shell settings and variables, which makes it much easier for a malicious actor to execute commands. Use 'shell=False' instead.",
+    "fix": "False",
+    "metadata": {
+     "source-rule-url": "https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html",
+     "owasp": [
+      "A01:2017 - Injection",
+      "A03:2021 - Injection",
+      "A05:2025 - Injection"
+     ],
+     "cwe": [
+      "CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
+     ],
+     "references": [
+      "https://stackoverflow.com/questions/3172470/actual-meaning-of-shell-true-in-subprocess",
+      "https://docs.python.org/3/library/subprocess.html"
+     ],
+     "category": "security",
+     "technology": [
+      "python"
+     ],
+     "cwe2022-top25": true,
+     "cwe2021-top25": true,
+     "subcategory": [
+      "secure default"
+     ],
+     "likelihood": "HIGH",
+     "impact": "LOW",
+     "confidence": "MEDIUM",
+     "license": "Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license",
+     "vulnerability_class": [
+      "Command Injection"
+     ],
+     "source": "https://semgrep.dev/r/python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+     "shortlink": "https://sg.run/J92w"
+    },
+    "severity": "ERROR",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.registry.javascript.express.security.injection.raw-html-format.raw-html-format",
+   "path": "server/index.js",
+   "start": {
+    "line": 6,
+    "col": 12,
+    "offset": 130
+   },
+   "end": {
+    "line": 6,
+    "col": 41,
+    "offset": 159
+   },
+   "extra": {
+    "message": "User data flows into the host portion of this manually-constructed HTML. This can introduce a Cross-Site-Scripting (XSS) vulnerability if this comes from user-provided input. Consider using a sanitization library such as DOMPurify to sanitize the HTML within.",
+    "metadata": {
+     "cwe": [
+      "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+     ],
+     "owasp": [
+      "A07:2017 - Cross-Site Scripting (XSS)",
+      "A03:2021 - Injection",
+      "A05:2025 - Injection"
+     ],
+     "references": [
+      "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+     ],
+     "category": "security",
+     "technology": [
+      "express"
+     ],
+     "cwe2022-top25": true,
+     "cwe2021-top25": true,
+     "subcategory": [
+      "vuln"
+     ],
+     "likelihood": "HIGH",
+     "impact": "MEDIUM",
+     "confidence": "MEDIUM",
+     "license": "Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license",
+     "vulnerability_class": [
+      "Cross-Site-Scripting (XSS)"
+     ],
+     "source": "https://semgrep.dev/r/javascript.express.security.injection.raw-html-format.raw-html-format",
+     "shortlink": "https://sg.run/5DO3"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.registry.javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+   "path": "server/index.js",
+   "start": {
+    "line": 6,
+    "col": 12,
+    "offset": 130
+   },
+   "end": {
+    "line": 6,
+    "col": 51,
+    "offset": 169
+   },
+   "extra": {
+    "message": "Detected directly writing to a Response object from user-defined input. This bypasses any HTML escaping and may expose your application to a Cross-Site-scripting (XSS) vulnerability. Instead, use 'resp.render()' to render safely escaped HTML.",
+    "metadata": {
+     "interfile": true,
+     "references": [
+      "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+     ],
+     "owasp": [
+      "A07:2017 - Cross-Site Scripting (XSS)",
+      "A03:2021 - Injection",
+      "A05:2025 - Injection"
+     ],
+     "cwe": [
+      "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+     ],
+     "category": "security",
+     "technology": [
+      "express"
+     ],
+     "cwe2022-top25": true,
+     "cwe2021-top25": true,
+     "subcategory": [
+      "vuln"
+     ],
+     "likelihood": "MEDIUM",
+     "impact": "MEDIUM",
+     "confidence": "MEDIUM",
+     "vulnerability_class": [
+      "Cross-Site-Scripting (XSS)"
+     ],
+     "license": "Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license",
+     "source": "https://semgrep.dev/r/javascript.express.security.audit.xss.direct-response-write.direct-response-write",
+     "shortlink": "https://sg.run/vzGl"
+    },
+    "severity": "WARNING",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  },
+  {
+   "check_id": "opt.repro.rules.registry.javascript.lang.security.audit.code-string-concat.code-string-concat",
+   "path": "server/index.js",
+   "start": {
+    "line": 10,
+    "col": 22,
+    "offset": 232
+   },
+   "end": {
+    "line": 10,
+    "col": 41,
+    "offset": 251
+   },
+   "extra": {
+    "message": "Found data from an Express or Next web request flowing to `eval`. If this data is user-controllable this can lead to execution of arbitrary system commands in the context of your application process. Avoid `eval` whenever possible.",
+    "metadata": {
+     "interfile": true,
+     "confidence": "HIGH",
+     "owasp": [
+      "A03:2021 - Injection",
+      "A05:2025 - Injection"
+     ],
+     "cwe": [
+      "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')"
+     ],
+     "references": [
+      "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval",
+      "https://nodejs.org/api/child_process.html#child_processexeccommand-options-callback",
+      "https://www.stackhawk.com/blog/nodejs-command-injection-examples-and-prevention/",
+      "https://ckarande.gitbooks.io/owasp-nodegoat-tutorial/content/tutorial/a1_-_server_side_js_injection.html"
+     ],
+     "category": "security",
+     "technology": [
+      "node.js",
+      "Express",
+      "Next.js"
+     ],
+     "subcategory": [
+      "vuln"
+     ],
+     "likelihood": "MEDIUM",
+     "impact": "MEDIUM",
+     "license": "Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license",
+     "vulnerability_class": [
+      "Code Injection"
+     ],
+     "source": "https://semgrep.dev/r/javascript.lang.security.audit.code-string-concat.code-string-concat",
+     "shortlink": "https://sg.run/96Yk"
+    },
+    "severity": "ERROR",
+    "fingerprint": "requires login",
+    "lines": "requires login",
+    "validation_state": "NO_VALIDATOR",
+    "engine_kind": "OSS"
+   }
+  }
+ ],
+ "errors": [],
+ "profiling_results": []
+}
