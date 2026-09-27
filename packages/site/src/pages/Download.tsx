@@ -44,7 +44,7 @@ export function Download() {
   return (
     <>
       <section className="intro">
-        <span className="eyebrow">download · v0.9.2 · MIT</span>
+        <span className="eyebrow">download · v0.1.0 · MIT</span>
         <h1 className="intro__title intro__title--download">Get Repro.</h1>
         <p className="intro__lede">Free and open source. Runs on your machine; your code never leaves it. Needs Docker for the sandbox.</p>
       </section>

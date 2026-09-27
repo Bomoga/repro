@@ -111,7 +111,7 @@ export function App() {
         <span>Repro · MIT</span>
         <a href={SAMPLE_REPORT_URL}>Sample report</a>
         <a href={GITHUB_URL}>GitHub</a>
-        <span className="ftr__made">Made at [Hackathon name] 2026</span>
+        <span className="ftr__made">Made at ShellHacks 2026</span>
       </footer>
     </div>
   );

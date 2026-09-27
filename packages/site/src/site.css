@@ -782,3 +782,16 @@ a.card__cta:hover {
 .ftr__made {
   margin-left: auto;
 }
+
+.team__photo {
+  position: relative;
+  overflow: hidden;
+}
+
+.team__photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

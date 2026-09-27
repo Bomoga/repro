@@ -76,7 +76,7 @@ export function RunsList({ summaries }: { summaries: Poll<RunSummary[]> }) {
               <span className="runrow__name">{targetTitle(run.target)}</span>
               <span className="runrow__stage">
                 <span className="runrow__tl">
-                  <StageTimeline run={run} size="sm" />
+                  <StageTimeline run={run} size="sm" modelStagesSkipped={counts.findings > 0 && counts.diagnoses === 0} />
                 </span>
                 <span className="runrow__where" data-ink={RUN_STATUS[run.status].ink}>
                   {RUN_STATUS[run.status].glyph} {whereText(run)}

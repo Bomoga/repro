@@ -12,9 +12,14 @@ const BY_FAMILY: Record<(typeof RUFF_SELECT)[number], { category: string; severi
   B: { category: "correctness", severity: "low" },
 };
 
-// Bandit's S101 ("assert used") is left out: it flags every assert in every pytest test, which would
-// bury the rest in Findings that all reproduce.
-export const RUFF_IGNORE = ["S101"] as const;
+// Left out:
+// - S101 ("assert used"): it flags every assert in every pytest test, which would bury the rest in
+//   Findings that all reproduce.
+// - S603 (subprocess call without shell=True) and S607 (process started with a partial path): they
+//   fire on every subprocess call, including the argument-list call that is the fix for S602/S604.
+//   Semgrep's subprocess rules still catch the injectable ones, and with these on, a correct fix
+//   counted as a regression and the gate rejected it.
+export const RUFF_IGNORE = ["S101", "S603", "S607"] as const;
 
 // Runs --isolated (the target's own ruff.toml/pyproject can't turn rules off) and --ignore-noqa
 // (its `# noqa` comments can't hide them), the same stance as Semgrep's --disable-nosem.

@@ -64,7 +64,8 @@ async function main(): Promise<void> {
   const executor = new DockerExecutor();
   const token = process.env.REPRO_GITHUB_TOKEN;
   const octokit = token ? new Octokit({ auth: token }) : undefined;
-  const prMode = runtimeSettings.setPullRequestMode(pullRequestModeFromEnv());
+  pullRequestModeFromEnv(); // a bad REPRO_PR_MODE still fails at startup
+  const prMode = runtimeSettings.pullRequestMode();
   if (prMode === "github" && !octokit) throw new Error("REPRO_PR_MODE=github needs REPRO_GITHUB_TOKEN");
   const say = (line: string) => console.log(line);
   const orchestrator = new Orchestrator({
