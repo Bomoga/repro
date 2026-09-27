@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { GITHUB_URL, NAV, SAMPLE_REPORT_URL, type Page } from "./content.ts";
+import { GITHUB_URL, NAV, type Page } from "./content.ts";
 import { usePage, useTheme } from "./lib.ts";
 import { Home } from "./pages/Home.tsx";
 import { Download } from "./pages/Download.tsx";
@@ -8,6 +8,7 @@ import { Pricing } from "./pages/Pricing.tsx";
 import { Results } from "./pages/Results.tsx";
 import { Faq } from "./pages/Faq.tsx";
 import { Credits } from "./pages/Credits.tsx";
+import { Report } from "./pages/Report.tsx";
 
 function NavLinks({ page, go, variant }: { page: Page; go: (p: Page) => void; variant: "bar" | "menu" }) {
   const cls = variant === "bar" ? "nav__link" : "menu__item";
@@ -104,6 +105,7 @@ export function App() {
         {page === "download" && <Download />}
         {page === "docs" && <Docs />}
         {page === "results" && <Results />}
+        {page === "report" && <Report />}
         {page === "pricing" && <Pricing go={go} />}
         {page === "faq" && <Faq />}
         {page === "credits" && <Credits />}
@@ -111,7 +113,7 @@ export function App() {
 
       <footer className="ftr">
         <span>Repro · v0.1.0</span>
-        <a href={SAMPLE_REPORT_URL}>Sample report</a>
+        <a href="#report">Sample report</a>
         <a href={GITHUB_URL}>GitHub</a>
         <span className="ftr__made">Made at ShellHacks 2026</span>
       </footer>
