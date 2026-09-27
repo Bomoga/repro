@@ -28,7 +28,7 @@ export function Pricing({ go }: { go: (page: Page) => void }) {
             <span className="receipt__v">{r.v}</span>
           </div>
         ))}
-        <div className="receipt__note">Model calls use your own Gemini key or Google sign-in. Tokens measured on the ShellHacks run of Bomoga/repro-demo.</div>
+        <div className="receipt__note">Model calls use your own key: Gemini by default, or any model through the MCP server. Tokens measured on the ShellHacks run of Bomoga/repro-demo.</div>
       </div>
     </section>
   );

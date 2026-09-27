@@ -1,3 +1,4 @@
+import { TOKENS_SAVED_PCT } from "./results.ts";
 // Every word on the site, copied from the design handoff (Repro Site.dc.html).
 
 export const INSTALL_COMMAND = "curl -fsSL repro.miami/install | sh";
@@ -128,7 +129,7 @@ export const RECEIPT = [
   { k: "Repro", v: "$0" },
   { k: "Semgrep, gitleaks", v: "$0" },
   { k: "Sandbox (your Docker)", v: "$0" },
-  { k: "Gemini tokens / verified fix", v: "1.96M (measured)" },
+  { k: "Tokens vs. fixing every finding separately", v: `−${TOKENS_SAVED_PCT}%` },
   { k: "Seats, accounts, telemetry", v: "none" },
 ];
 

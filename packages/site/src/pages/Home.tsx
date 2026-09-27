@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { INSTALL_COMMAND, type Page } from "../content.ts";
 import { useCopy } from "../lib.ts";
+import { TOKENS_SAVED_PCT } from "../results.ts";
 
 export function Home({ go }: { go: (page: Page) => void }) {
   const [copied, copy] = useCopy(INSTALL_COMMAND);
@@ -24,15 +25,15 @@ export function Home({ go }: { go: (page: Page) => void }) {
       <section className="stat">
         <div className="stat__row">
           <span className="stat__item">
-            <span className="stat__num">29</span>
-            <span className="stat__label">findings reproduced</span>
+            <span className="stat__num">0%</span>
+            <span className="stat__label">tokens to find bugs</span>
           </span>
           <span className="stat__arrow" aria-hidden="true">
             →
           </span>
           <span className="stat__item">
-            <span className="stat__num stat__num--real">15</span>
-            <span className="stat__label">root causes to fix</span>
+            <span className="stat__num stat__num--real">{TOKENS_SAVED_PCT}%</span>
+            <span className="stat__label">fewer tokens to fix them</span>
           </span>
         </div>
         <p className="stat__stages">Ingest → Detect → Diagnose → Repair → Verify</p>

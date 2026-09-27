@@ -38,7 +38,7 @@ export const RESULTS = {
     detection: { label: "Finding and reproducing 29 issues", tokens: 0, how: "Scanners and the sandbox, no model: 0 tokens for detection and reproduction." },
     grouping: { label: "Grouping 29 findings into 15 root causes", tokens: 3_346_864, how: "14 fewer repair sessions × 239,062 tokens per measured attempt." },
     gate: { label: "Rejecting bad patches before the Challenger", tokens: 340_420, how: "4 patches failed the deterministic checks × 85,105 tokens per measured challenge." },
-    cache: { label: "Served from Gemini's context cache", tokens: 1_677_547, how: "47.6% of input tokens were cache hits, billed at the cached rate." },
+    cache: { label: "Served from the model's context cache", tokens: 1_677_547, how: "47.6% of input tokens were cache hits, billed at the cached rate." },
   },
   benchmarks: [
     { repo: "appsecco/dvna", files: 151, findings: 11, reproduced: 11, seconds: 42 },
@@ -46,3 +46,11 @@ export const RESULTS = {
     { repo: "OWASP/NodeGoat", files: 111, findings: 306, reproduced: null as number | null, seconds: null as number | null },
   ],
 };
+
+// Share of the tokens a run would have spent without grouping and early rejection, rounded: the
+// one headline the home page and pricing quote, computed so they always match the results page.
+export const TOKENS_SAVED_PCT = Math.round(
+  ((RESULTS.saved.grouping.tokens + RESULTS.saved.gate.tokens) /
+    (RESULTS.tokens.total + RESULTS.saved.grouping.tokens + RESULTS.saved.gate.tokens)) *
+    100,
+);

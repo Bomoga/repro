@@ -796,6 +796,8 @@ a.card__cta:hover {
   object-fit: cover;
 }
 
+.res { display: flex; flex-direction: column; gap: 24px; }
+.res > .intro { margin-bottom: 24px; }
 .res__lede { max-width: 60ch; color: var(--ink2); }
 .res__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; margin-bottom: 24px; }
 .res__stat { display: flex; flex-direction: column; gap: 4px; padding: 18px; }
