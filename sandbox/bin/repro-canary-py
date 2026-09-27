@@ -5,9 +5,14 @@ the canary went. Not run directly; repro-canary runs it and judges the result.
 Usage: repro-canary-py <file> <function> <canary> <report.json>
 
 Sinks recorded: log records (the root logger, at DEBUG), anything printed to stdout/stderr, and
-outbound HTTP through http.client (which requests, urllib3, and urllib all sit on): the request is
-captured with its payload and never sent. Files written are found by repro-canary itself, by
-comparing the file tree before and after.
+outbound requests. A request is captured where its payload is still plaintext, above TLS, through
+the clients that cover most Python code: http.client (urllib and anything else built on it), urllib3
+(requests, botocore, ...), and httpx. It's recorded with its URL, headers, and body, never sent, and
+fails the way a refused connection would, so the target's own error handling runs. Any other way out
+(a raw socket, aiohttp, a vendored client) is still seen, when it resolves a name or connects, but
+without its payload: it's recorded as uncaptured, so repro-canary can say it couldn't tell rather
+than "the canary never left". Files written are found by repro-canary itself, by comparing the file
+tree before and after.
 """
 import asyncio
 import contextlib
@@ -28,7 +33,52 @@ FILE, FUNCTION, CANARY, REPORT = sys.argv[1:5]
 ROOT = os.getcwd()
 report = {"called": False, "returned": False, "error": None, "logs": [], "requests": []}
 
-# --- outbound HTTP: capture the request, never connect -------------------------------------------
+# --- outbound requests: capture the payload, never connect ---------------------------------------
+BLOCKED = "repro-canary: outbound connection blocked"
+
+
+def _is_loopback(host) -> bool:
+    host = (host.decode() if isinstance(host, bytes) else str(host or "")).strip("[]").lower()
+    return host in ("", "localhost", "::1", "0.0.0.0") or host.startswith("127.") or host.endswith(".localhost")
+
+
+def _record(host, port, payload, url=None):
+    """One outbound attempt. payload None: one whose payload couldn't be seen."""
+    report["requests"].append({
+        "host": str(host or ""),
+        "port": port,
+        "url": url,
+        "payload": payload or "",
+        "captured": payload is not None,
+    })
+
+
+def _text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", "replace")
+    if isinstance(value, str):
+        return value
+    if hasattr(value, "read"):
+        return _text(value.read())
+    if isinstance(value, dict):
+        return json.dumps(value, default=str)
+    return "".join(_text(chunk) for chunk in value)  # an iterable body, e.g. a generator
+
+
+def _request_text(method, url, headers, body):
+    """The request as sent, minus TLS: request line, headers, body. None if the body can't be read."""
+    try:
+        items = headers.items() if hasattr(headers, "items") else (headers or [])
+        head = "\n".join(f"{k}: {v}" for k, v in items)
+        return f"{method} {url}\n{head}\n\n{_text(body)}"
+    except Exception:
+        return None
+
+
+# http.client, and urllib.request on top of it: the connection is a no-op, and what would have been
+# written to the socket is the payload.
 _pending = {}
 
 
@@ -43,8 +93,8 @@ def _connect(self):
 
 def _getresponse(self, *args, **kwargs):
     buf = _pending.pop(id(self), {"host": self.host, "port": self.port, "data": b""})
-    report["requests"].append({"host": buf["host"], "port": buf["port"], "payload": buf["data"].decode("utf-8", "replace")})
-    raise ConnectionRefusedError(f"repro-canary: outbound connection to {buf['host']} blocked")
+    _record(buf["host"], buf["port"], buf["data"].decode("utf-8", "replace"))
+    raise ConnectionRefusedError(f"{BLOCKED} ({buf['host']})")
 
 
 http.client.HTTPConnection.send = _send
@@ -52,12 +102,96 @@ http.client.HTTPConnection.connect = _connect
 http.client.HTTPConnection.getresponse = _getresponse
 
 
-def _no_socket(*args, **kwargs):
-    target = args[0] if args else kwargs.get("address")
-    report["requests"].append({"host": str(target), "port": None, "payload": ""})
-    raise ConnectionRefusedError("repro-canary: raw socket connection blocked")
+def _hook_urllib3():
+    """urllib3, and requests on top of it: urllib3 opens its own sockets rather than http.client's."""
+    try:
+        from urllib3 import connectionpool, exceptions
+    except Exception:
+        return
+
+    def urlopen(self, method, url, body=None, headers=None, *args, **kwargs):
+        port = "" if self.port is None else f":{self.port}"
+        full = url if "://" in url else f"{self.scheme}://{self.host}{port}{url}"
+        _record(self.host, self.port, _request_text(method, full, headers, body), url=full)
+        # What a refused connection looks like to urllib3's callers (requests: ConnectionError).
+        raise exceptions.MaxRetryError(self, url, exceptions.ProtocolError(BLOCKED))
+
+    connectionpool.HTTPConnectionPool.urlopen = urlopen
 
 
+def _hook_httpx():
+    """httpx: its transports (httpcore) open their own sockets too."""
+    try:
+        import httpx
+    except Exception:
+        return
+
+    def record(request, body):
+        payload = None if body is None else _request_text(request.method, str(request.url), request.headers, body)
+        _record(request.url.host, request.url.port, payload, url=str(request.url))
+
+    def handle_request(self, request):
+        try:
+            body = request.read()
+        except Exception:
+            body = None
+        record(request, body)
+        raise httpx.ConnectError(BLOCKED, request=request)
+
+    async def handle_async_request(self, request):
+        try:
+            body = await request.aread()
+        except Exception:
+            body = None
+        record(request, body)
+        raise httpx.ConnectError(BLOCKED, request=request)
+
+    httpx.HTTPTransport.handle_request = handle_request
+    httpx.AsyncHTTPTransport.handle_async_request = handle_async_request
+
+
+_hook_urllib3()
+_hook_httpx()
+
+
+# Anything else that reaches for the network (a raw socket, aiohttp, a vendored client) is seen when it
+# resolves a name or connects, but its payload isn't: recorded as uncaptured. Loopback isn't a way out.
+_real_getaddrinfo = socket.getaddrinfo
+_real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+
+
+def _watch_address(address, family=None):
+    if family not in (None, socket.AF_INET, socket.AF_INET6) or not isinstance(address, tuple) or not address:
+        return
+    if not _is_loopback(address[0]):
+        _record(address[0], address[1] if len(address) > 1 else None, None)
+
+
+def _getaddrinfo(host, port, *args, **kwargs):
+    if host is not None and not _is_loopback(host):
+        _record(host.decode() if isinstance(host, bytes) else host, port, None)
+    return _real_getaddrinfo(host, port, *args, **kwargs)
+
+
+def _connect_socket(self, address):
+    _watch_address(address, self.family)
+    return _real_connect(self, address)
+
+
+def _connect_socket_ex(self, address):
+    _watch_address(address, self.family)
+    return _real_connect_ex(self, address)
+
+
+def _no_socket(address, *args, **kwargs):
+    _watch_address(address)
+    raise ConnectionRefusedError(BLOCKED)
+
+
+socket.getaddrinfo = _getaddrinfo
+socket.socket.connect = _connect_socket
+socket.socket.connect_ex = _connect_socket_ex
 socket.create_connection = _no_socket
 
 # --- logs --------------------------------------------------------------------------------------------
@@ -138,7 +272,7 @@ def main():
     finally:
         signal.alarm(0)
         for buf in _pending.values():
-            report["requests"].append({"host": buf["host"], "port": buf["port"], "payload": buf["data"].decode("utf-8", "replace")})
+            _record(buf["host"], buf["port"], buf["data"].decode("utf-8", "replace"))
         report["logs"] += [line for line in (out.getvalue() + err.getvalue()).splitlines() if line.strip()]
         with open(REPORT, "w") as fh:
             json.dump(report, fh)

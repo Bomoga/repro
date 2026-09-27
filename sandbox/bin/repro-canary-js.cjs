@@ -6,12 +6,15 @@
 //
 // Sinks recorded: console.* and anything written to stdout/stderr, localStorage/sessionStorage,
 // and outbound requests through fetch, http(s).request/get, and navigator.sendBeacon, captured
-// with their payload and never sent. Files written are found by repro-canary itself.
+// with their URL, headers, and payload and never sent. Any other connection out (a raw socket,
+// undici imported directly, http2, ...) is recorded without its payload, as uncaptured, so
+// repro-canary can say it couldn't tell. Files written are found by repro-canary itself.
 "use strict";
 
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
+const net = require("node:net");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { pathToFileURL } = require("node:url");
@@ -53,17 +56,44 @@ const hostOf = (url) => {
     return String(url);
   }
 };
+const headerText = (headers) => {
+  try {
+    if (!headers) return "";
+    const entries =
+      typeof headers.entries === "function" ? [...headers.entries()] : Array.isArray(headers) ? headers : Object.entries(headers);
+    return entries.map(([k, v]) => `${k}: ${v}`).join("\n");
+  } catch {
+    return "";
+  }
+};
 
 globalThis.fetch = async (input, init = {}) => {
+  const isRequest = typeof Request !== "undefined" && input instanceof Request;
   const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
-  report.requests.push({ host: hostOf(url), url: String(url), payload: bodyText(init.body) });
+  const entry = { host: hostOf(url), url: String(url), payload: "", captured: true };
+  report.requests.push(entry);
+  let body = init.body;
+  if (body == null && isRequest) {
+    try {
+      body = await input.clone().text();
+    } catch {
+      entry.captured = false;
+    }
+  }
+  entry.payload = `${headerText(init.headers ?? (isRequest ? input.headers : undefined))}\n\n${bodyText(body)}`;
   throw new TypeError("fetch failed (repro-canary: outbound connection blocked)");
 };
 
 function fakeRequest(mod, protocol) {
   return function request(...args) {
     const opts = typeof args[0] === "string" || args[0] instanceof URL ? new URL(String(args[0])) : args[0] || {};
-    const entry = { host: opts.host || opts.hostname || "", url: `${protocol}//${opts.hostname || opts.host || ""}${opts.path || opts.pathname || ""}`, payload: "" };
+    const extra = typeof args[1] === "object" && args[1] !== null && typeof args[1] !== "function" ? args[1] : {};
+    const entry = {
+      host: opts.host || opts.hostname || "",
+      url: `${protocol}//${opts.hostname || opts.host || ""}${opts.path || opts.pathname || ""}${opts.search || ""}`,
+      payload: `${headerText(extra.headers ?? opts.headers)}\n\n`,
+      captured: true,
+    };
     report.requests.push(entry);
     const req = new EventEmitter();
     req.write = (chunk) => {
@@ -75,12 +105,40 @@ function fakeRequest(mod, protocol) {
       setImmediate(() => req.emit("error", new Error("repro-canary: outbound connection blocked")));
       return req;
     };
-    req.setHeader = req.setTimeout = req.abort = req.destroy = () => req;
+    req.setHeader = (name, value) => {
+      entry.payload = `${name}: ${value}\n${entry.payload}`;
+      return req;
+    };
+    req.setTimeout = req.abort = req.destroy = () => req;
     return req;
   };
 }
 http.request = http.get = fakeRequest(http, "http:");
 https.request = https.get = fakeRequest(https, "https:");
+
+// Anything else that opens a TCP connection (a raw socket, undici imported directly, http2, tls) is
+// seen here but its payload isn't: recorded as uncaptured, and the connection goes ahead untouched
+// (and fails: the sandbox has no network). Loopback isn't a way out.
+const LOOPBACK = /^(localhost|::1|0\.0\.0\.0|127(\.\d{1,3}){3}|.*\.localhost)$/i;
+const realConnect = net.Socket.prototype.connect;
+net.Socket.prototype.connect = function connect(...args) {
+  try {
+    const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+    const opts =
+      first !== null && typeof first === "object"
+        ? first
+        : typeof first === "number" || /^\d+$/.test(String(first))
+          ? { port: first, host: typeof args[1] === "string" ? args[1] : undefined }
+          : { path: first };
+    if (!opts.path) {
+      const host = String(opts.host ?? opts.hostname ?? "localhost").replace(/^\[|\]$/g, "");
+      if (!LOOPBACK.test(host)) report.requests.push({ host, url: `tcp://${host}:${opts.port ?? ""}`, payload: "", captured: false });
+    }
+  } catch {
+    // Recording is best effort; it never gets in the connection's way.
+  }
+  return realConnect.apply(this, args);
+};
 // Node 22 defines a getter-only global navigator: extend it rather than replace it.
 const sendBeacon = (url, data) => {
   report.requests.push({ host: hostOf(url), url: String(url), payload: bodyText(data) });

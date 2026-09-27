@@ -8,21 +8,30 @@ repro-canary-py and repro-canary-js.cjs for how arguments are chosen), then look
 the sink this check is about:
   prompt-logging                    log records, console output, stdout/stderr, *.log files
   unencrypted-conversation-storage  files written in plaintext, localStorage/sessionStorage
-  third-party-forwarding            an outbound request payload to a host that isn't a model provider
-  analytics-forwarding              an outbound request payload to any host
+  third-party-forwarding            an outbound request (URL, headers, or body) to a host that isn't a
+                                    model provider
+  analytics-forwarding              an outbound request (URL, headers, or body) to any host
 Outbound requests are intercepted and recorded, never sent (and the sandbox has no network anyway):
-the point is proving the code tried to send the canary, not sending it.
+the point is proving the code tried to send the canary, not sending it. The harnesses capture the
+common HTTP clients above TLS; any other way the function reaches the network is recorded as an
+attempt whose payload couldn't be seen, and for the forwarding checks that means it can't tell, never
+"the canary wasn't sent".
 
 Same exit protocol as the other repro-* helpers, with <line> (the Finding's line at detect time)
 printed in the REPRODUCED line:
   exit 1  "REPRODUCED ..."       the canary reached the sink
   exit 0  "NOT REPRODUCED ..."   the function ran to completion and the canary didn't
-  exit 2  reason on stderr       it couldn't tell: the function couldn't be loaded or called, or it
-                                 failed before the canary showed up anywhere (never read as "fixed")
+  exit 2  reason on stderr       it couldn't tell: the function couldn't be loaded or called, it
+                                 failed before the canary showed up anywhere, or (forwarding checks)
+                                 it reached the network in a way the harness can't see into. Never
+                                 read as "fixed".
 
 With <semgrep-pack> <rule-id>, a run that can't tell falls back to re-running that Semgrep rule on
-the file (repro-semgrep-rule), after a line saying the canary couldn't run: a Finding the canary
+the file (repro-semgrep-rule), after a line saying the canary couldn't decide: a Finding the canary
 can't exercise keeps the static reproduction it had, and its output says which kind of proof it is.
+One exception: when the function still reached the network in a way the canary couldn't see into,
+the rule no longer matching doesn't make it fixed (sending the data some other way isn't a fix), so
+that ends in exit 2 as well.
 """
 import json
 import os
@@ -43,7 +52,13 @@ MODEL_PROVIDERS = re.compile(
 )
 
 
-def fail(msg: str) -> None:
+# Set when the function reached the network in a way the harness couldn't see into.
+UNSEEN = False
+
+
+def fail(msg: str, unseen: bool = False) -> None:
+    global UNSEEN
+    UNSEEN = UNSEEN or unseen
     print(f"repro-canary: {msg}", file=sys.stderr)
     sys.exit(2)
 
@@ -85,10 +100,14 @@ def main():
         run(*sys.argv[1:5])
     except SystemExit as done:
         if done.code == 2 and fallback:
-            print("canary tracing couldn't run here; falling back to re-running the Semgrep rule", flush=True)
+            print("canary tracing couldn't decide here; falling back to re-running the Semgrep rule", flush=True)
             proc = subprocess.run(["repro-semgrep-rule", fallback[0], fallback[1], sys.argv[2]], capture_output=True, text=True)
             sys.stdout.write(proc.stdout)
             sys.stderr.write(proc.stderr)
+            if UNSEEN and proc.returncode == 0:
+                print("repro-canary: the Semgrep rule no longer matches, but the function still reaches the network in a "
+                      "way the canary can't see into, so it can't be called fixed", file=sys.stderr)
+                sys.exit(2)
             sys.exit(proc.returncode)
         raise
 
@@ -128,6 +147,7 @@ def run(check, target, function, line):
         shutil.rmtree(workdir, ignore_errors=True)
 
     hits = []
+    unseen = []
     if check == "prompt-logging":
         hits += [f'canary reached the logs: "{show(l, canary)}"' for l in report.get("logs", []) if canary in l]
         hits += [f"canary written to log file {os.path.relpath(p, ROOT) if p.startswith(ROOT) else p}"
@@ -137,10 +157,16 @@ def run(check, target, function, line):
                  for p in written if not p.endswith(".log") and canary in read(p)]
         hits += [f'canary stored in plaintext in {s["store"]}["{s["key"]}"]' for s in report.get("storage", []) if canary in s.get("value", "")]
     else:
+        # Analytics counts any host; for third-party forwarding, a model provider isn't a third party.
+        def counts(host):
+            return check == "analytics-forwarding" or not MODEL_PROVIDERS.match(host)
+
         for r in report.get("requests", []):
             host = r.get("host") or ""
-            if canary in (r.get("payload") or "") and (check == "analytics-forwarding" or not MODEL_PROVIDERS.match(host)):
+            sent = f"{r.get('url') or ''}\n{r.get('payload') or ''}"
+            if r.get("captured", True) and canary in sent and counts(host):
                 hits.append(f"canary sent to {host or r.get('url')}")
+        unseen = sorted({r.get("host") or "?" for r in report.get("requests", []) if not r.get("captured", True) and counts(r.get("host") or "")})
 
     # Clean up what this call created, so the next run starts the same: new files carrying this
     # run's canary (nothing else can contain it), then any directories left empty. Other files are
@@ -164,6 +190,9 @@ def run(check, target, function, line):
             print(f"REPRODUCED canary {check} at {target}:{line}-{line}: {hit}")
         print(f"called {function}() in {target} with a unique canary as the user input")
         sys.exit(1)
+    if unseen:
+        fail(f"{function}() in {target} reached for {', '.join(unseen)}, but not through a client the canary can see "
+             "the payload of, so it can't tell whether the canary was sent", unseen=True)
     if report.get("called") and report.get("returned"):
         print(f"NOT REPRODUCED canary {check} in {target}: {function}() ran and the canary never reached that sink")
         sys.exit(0)

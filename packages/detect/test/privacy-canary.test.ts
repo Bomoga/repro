@@ -100,4 +100,73 @@ describe.skipIf(!ready)("canary tracing (sandbox)", () => {
     const after = await exec.exec({ workspacePath: ws.path, command: logging.reproductionCommand!, timeoutMs: 120_000 });
     expect(after.stdout).toMatch(/^NOT REPRODUCED canary prompt-logging/);
   }, 300_000);
+
+  // Review of PR #22, bug 2: the Python harness only saw http.client, so a request through httpx or
+  // requests (exactly the clients the forwarding rule matches) went unseen, and wrapped in try/except
+  // it read as "the canary never left": a real leak came out unconfirmed, and a bare try/except
+  // passed as a fix.
+  it("watches Python send the canary through httpx and requests, even when the error is swallowed", async () => {
+    const ws = await repo(join(FIXTURES, "canary-forwarding"));
+    const detected = await detect(ws, exec, [privacyPatternsAdapter], { install: null });
+    expect(detected.failures).toEqual([]);
+    const { findings } = await reproduce(detected.findings, ws, exec);
+    expect(findings.map((f) => f.file).sort()).toEqual(["share_httpx_swallowed.py", "share_httpx_uncaught.py", "share_requests_swallowed.py"]);
+    for (const f of findings) {
+      expect(f.ruleId).toBe("privacy.third-party-forwarding.py");
+      expect(f.reproductionCommand).toMatch(/^repro-canary 'third-party-forwarding' /);
+      expect(f.reproducible).toBe(true);
+      const at = `${f.file.replace(/\./g, "\\.")}:${f.lineStart}-${f.lineStart}`;
+      expect(f.reproductionOutput).toMatch(new RegExp(`^REPRODUCED canary third-party-forwarding at ${at}: canary sent to collector\\.example\\.com`));
+    }
+  }, 300_000);
+
+  it("doesn't let a bare try/except, or a switch to a client it can't see into, pass as a fix", async () => {
+    const ws = await repo(join(FIXTURES, "canary-forwarding"));
+    const detected = await detect(ws, exec, [privacyPatternsAdapter], { install: null });
+    const finding = detected.findings.find((f) => f.file === "share_httpx_uncaught.py")!;
+    const file = join(ws.path, finding.file);
+    const original = readFileSync(file, "utf8");
+    const rerun = () => exec.exec({ workspacePath: ws.path, command: finding.reproductionCommand!, timeoutMs: 120_000 });
+    const call = '    httpx.post("https://collector.example.com/v1/events", json={"prompt": prompt})\n';
+    const swallowed = original.replace(call, `    try:\n    ${call}    except Exception:\n        pass\n`);
+
+    // The lazy "fix": swallow the error. The prompt still goes out, so it still reproduces (exit 1),
+    // which lane 3's gate reads as not fixed.
+    writeFileSync(file, swallowed);
+    let after = await rerun();
+    expect(after.exitCode).toBe(1);
+    expect(after.stdout).toMatch(/^REPRODUCED canary third-party-forwarding at share_httpx_uncaught\.py:5-5: canary sent to collector\.example\.com/);
+
+    // Sending over a raw socket instead: the Semgrep rule no longer matches, but the canary saw the
+    // function still reach collector.example.com without seeing what it sent. Could not tell (exit 2),
+    // never "not reproduced".
+    writeFileSync(
+      file,
+      'import socket\n\n\ndef share_prompt(prompt):\n    try:\n        sock = socket.socket()\n        sock.connect(("collector.example.com", 443))\n        sock.sendall(prompt.encode())\n    except OSError:\n        pass\n',
+    );
+    after = await rerun();
+    expect(after.exitCode).toBe(2);
+    expect(after.stdout).not.toMatch(/^NOT REPRODUCED canary/m);
+    expect(after.stderr).toMatch(/reached for collector\.example\.com, but not through a client the canary can see the payload of/);
+    expect(after.stderr).toMatch(/can't be called fixed/);
+
+    // A real fix: the prompt no longer goes out. Now it's fixed (exit 0).
+    writeFileSync(file, swallowed.replace('json={"prompt": prompt}', 'json={"event": "prompt_shared"}'));
+    after = await rerun();
+    expect(after.exitCode).toBe(0);
+    expect(after.stdout).toMatch(/^NOT REPRODUCED canary third-party-forwarding in share_httpx_uncaught\.py/);
+  }, 300_000);
+
+  it("says it can't tell when a function reaches the network in a way it can't see into", async () => {
+    const ws = await repo(join(FIXTURES, "canary-forwarding"));
+    for (const [file, fn] of [
+      ["blind_socket.py", "share_prompt"],
+      ["blind_socket.js", "sharePrompt"],
+    ]) {
+      const r = await exec.exec({ workspacePath: ws.path, command: `repro-canary third-party-forwarding ${file} ${fn} 5`, timeoutMs: 120_000 });
+      expect(r.exitCode).toBe(2);
+      expect(r.stdout).not.toContain("REPRODUCED");
+      expect(r.stderr).toMatch(/reached for collector\.example\.com, but not through a client the canary can see the payload of/);
+    }
+  }, 300_000);
 });
