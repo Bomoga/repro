@@ -8,7 +8,9 @@
   ],
   "exclude": [
     "packages/*/test/fixtures",
-    // Lane 4's web has its own tsconfig (JSX, DOM); the root build checks it separately.
-    "packages/web"
+    // The dashboard and the marketing site have their own tsconfigs (JSX, DOM); the root build
+    // checks them separately.
+    "packages/web",
+    "packages/site"
   ]
 }
