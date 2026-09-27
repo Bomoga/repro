@@ -1,5 +1,5 @@
 import type { Patch, Run } from "@repro/contracts";
-import type { Health, PatchDecision, RunDetail, RunReport, RunSummary, TrustReport } from "@repro/api";
+import type { GoogleSignInStatus, Health, PatchDecision, RunDetail, RunReport, RunSummary, TrustReport } from "@repro/api";
 
 // Same pattern as @repro/cli's client: a small typed wrapper over the tRPC HTTP endpoints, not
 // a full @trpc/client, since the dashboard only ever calls these fixed procedures. Requests go
@@ -56,4 +56,14 @@ export const api = {
   trustReport: (runId: string, patchId: string) => query<TrustReport>("patches.trustReport", { runId, patchId }),
   decidePatch: (patchId: string, decision: PatchDecision) => mutate<Patch>("patches.decide", { patchId, decision }),
   report: (runId: string) => query<RunReport>("report", { runId }),
+  googleAccount: () => query<GoogleSignInStatus>("auth.google"),
 };
+
+/**
+ * Where the browser goes to sign the control plane in to Google. The sign-in routes live on the
+ * API itself (Google redirects straight back to them), so this points at the API's own origin.
+ */
+export function googleSignInUrl(): string {
+  const origin = `${window.location.protocol}//${window.location.hostname}:4000`;
+  return `${origin}/auth/google/start?return=${encodeURIComponent(window.location.href)}`;
+}

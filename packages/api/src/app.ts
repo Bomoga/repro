@@ -4,6 +4,7 @@ import { fastifyTRPCPlugin, type FastifyTRPCPluginOptions } from "@trpc/server/a
 import { appRouter, type AppRouter } from "./router.ts";
 import { checkHealth } from "./health.ts";
 import { githubWebhook } from "./github-webhook.ts";
+import { googleSignIn } from "./google-sign-in.ts";
 import type { Context } from "./trpc.ts";
 import type { RunStore } from "./store/index.ts";
 
@@ -37,6 +38,7 @@ export function buildApp(store: RunStore, options: BuildAppOptions = {}): Fastif
   } satisfies FastifyTRPCPluginOptions<AppRouter>);
 
   if (options.githubWebhookSecret) app.register(githubWebhook(store, options.githubWebhookSecret));
+  app.register(googleSignIn());
 
   return app;
 }

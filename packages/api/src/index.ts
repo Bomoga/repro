@@ -9,5 +9,6 @@ export { buildTrustReport, type TrustReport } from "./trust.ts";
 export { buildReport, type FindingJourneyStatus, type ReportedStage, type RunReport } from "./report.ts";
 export { recordPullRequestClosed, type PullRequestClosed, type PullRequestOutcome } from "./pull-requests.ts";
 export { githubWebhook, validGitHubSignature } from "./github-webhook.ts";
+export { googleSignIn, googleSignInStatus, isLoopbackUrl, type GoogleSignInStatus } from "./google-sign-in.ts";
 export { demoRunRecords, importRunRecord, seedDemoData, type RunRecord, type SeedResult } from "./seed.ts";
 export * from "./store/index.ts";
