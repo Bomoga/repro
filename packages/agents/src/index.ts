@@ -17,5 +17,6 @@ export type { ChallengeInput, ChallengeDeps, ChallengeResult } from "./verify/ch
 export { CounterTestRunner, runStatus, outcomeOf, outcomeOfRun, missingModule } from "./verify/counter-tests.js";
 export type { CounterTest, CounterTestRun, CounterTestOutcome, RunStatus } from "./verify/counter-tests.js";
 export { CHALLENGER_SYSTEM_PROMPT } from "./verify/prompt.js";
+export { findEvasions, type Evasion, type EvasionKind, type EvasionOptions } from "./verify/evasion.js";
 export { repairAndVerify, MAX_ATTEMPTS_PER_DIAGNOSIS } from "./pipeline.js";
 export type { RepairAndVerifyInput, RepairAndVerifyDeps, RepairAndVerifyResult, AttemptRecord, RepairProgress } from "./pipeline.js";

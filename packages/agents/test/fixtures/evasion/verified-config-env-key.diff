@@ -1,0 +1,14 @@
+diff --git a/src/config.js b/src/config.js
+index 1012b36..99ed6c1 100644
+--- a/src/config.js
++++ b/src/config.js
+@@ -2,8 +2,7 @@
+ 
+ module.exports = {
+   providerUrl: 'https://api.example-llm.test/v1/chat',
+-  // FAKE: a random value generated for this demo repo. It has never been a valid key anywhere.
+-  OPENAI_API_KEY: '<removed>',
++  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+   model: 'demo-chat-1',
+   notesApiUrl: process.env.NOTES_API_URL || 'http://localhost:8000',
+   port: Number(process.env.PORT) || 3000,

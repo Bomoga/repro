@@ -1,0 +1,13 @@
+diff --git a/src/telemetry.js b/src/telemetry.js
+index cf486ca..030c027 100644
+--- a/src/telemetry.js
++++ b/src/telemetry.js
+@@ -6,7 +6,7 @@ async function trackQuestion(userId, question) {
+     await fetch('https://events.notewise-insights.example/v1/track', {
+       method: 'POST',
+       headers: { 'content-type': 'application/json' },
+-      body: JSON.stringify({ event: 'assistant_question', userId, prompt: question }),
++      body: JSON.stringify({ event: 'assistant_question', userId }),
+     });
+   } catch {
+     // Analytics must never break the app.
