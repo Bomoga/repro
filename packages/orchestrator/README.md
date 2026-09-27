@@ -12,7 +12,9 @@ The Run Orchestrator from `CLAUDE.md` section 3. It polls the Run Store for queu
 
 A stage that throws fails the Run where it stands. A Repair that throws is logged and skipped; the Run fails only if every Repair did. A PR that can't be opened is logged and never fails the Run. Every Gemini interaction, tool call, counter-test, and stage event goes to the Run's log in the Run Store (section 9), and the log ends with the Run's Gemini request count per model.
 
-Two things end the repairs early. When the Run's Pro-tier request budget (`REPRO_PRO_REQUEST_BUDGET`) can't cover another diagnosis, or runs out in the middle of one, the Run stops scheduling repairs, logs `budget-reached` with the counts and how many diagnoses it skipped, opens PRs for the patches already verified, and completes. When a Gemini daily quota runs out, it does the same and then fails, with the quota's message. A diagnosis already in flight when either happens is cut short.
+Two things end the repairs early. When the Run's Pro-tier request budget (`REPRO_PRO_REQUEST_BUDGET`) can't cover another diagnosis, or runs out in the middle of one, the Run stops scheduling repairs, logs `budget-reached` with the counts and how many diagnoses it skipped, opens PRs for the patches already verified, and completes. When a Gemini daily quota runs out, it does the same and then fails, with the quota's message. The diagnosis that ran into the limit is cut short.
+
+With `REPRO_REPAIR_CONCURRENCY` above 1, several diagnoses are repaired at once. Each one in flight works in its own copy of the Run's workspace, cloned beside it the way Ingest clones a target (the same git settings, so a patch made in a copy applies byte for byte to `headCommit`), and removed when that diagnosis is done unless `REPRO_KEEP_WORKSPACES=1`. The Run's stage is `repair` while any diagnosis is being repaired and `verify` only while every one in flight is with the Challenger. A diagnosis starts only when the budget covers its worst case on top of every one in flight's; the stops above end scheduling, and diagnoses already in flight finish or fail on their own. PRs still wait for the repair phase and open in diagnosis order. Console lines from a diagnosis carry its first eight characters, since several interleave.
 
 ## Running it
 
@@ -33,6 +35,7 @@ Then queue work the usual way: `npm run cli -- scan <path | owner/repo>` or the 
 | `REPRO_GITHUB_WEBHOOK_SECRET` | Also takes GitHub's `pull_request` webhook at `POST /github/webhook`. |
 | `REPRO_KEEP_WORKSPACES=1` | Keep each Run's clone under `~/.repro/workspaces` for debugging. |
 | `REPRO_PRO_REQUEST_BUDGET` | The most requests one Run sends to the Pro-tier models, the ones behind Diagnose and the Challenger after any `REPRO_MODEL_*` override: every attempt, retry, and background poll counts. A positive integer; unset means no cap. Before each diagnosis the Run checks that what's left covers one diagnosis's worst case, 2 attempts × (10 Challenger tool calls + 3) = 26 requests. Keep it under the project's daily quota: 220 leaves room on a 250-a-day Tier 1 project. |
+| `REPRO_REPAIR_CONCURRENCY` | How many diagnoses one Run repairs at once; a positive integer, default 1 (one after another in the Run's workspace, as before). Above 1, each diagnosis in flight gets its own workspace copy, and the sandbox runs that many diagnoses' commands side by side, each container with its own memory and CPU limits, so size it to the machine: 3 is a reasonable start. |
 
 ## Pull requests
 
