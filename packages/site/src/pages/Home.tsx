@@ -24,15 +24,15 @@ export function Home({ go }: { go: (page: Page) => void }) {
       <section className="stat">
         <div className="stat__row">
           <span className="stat__item">
-            <span className="stat__num">412</span>
-            <span className="stat__label">scanner warnings</span>
+            <span className="stat__num">29</span>
+            <span className="stat__label">findings reproduced</span>
           </span>
           <span className="stat__arrow" aria-hidden="true">
             →
           </span>
           <span className="stat__item">
-            <span className="stat__num stat__num--real">5</span>
-            <span className="stat__label">actually real</span>
+            <span className="stat__num stat__num--real">15</span>
+            <span className="stat__label">root causes to fix</span>
           </span>
         </div>
         <p className="stat__stages">Ingest → Detect → Diagnose → Repair → Verify</p>

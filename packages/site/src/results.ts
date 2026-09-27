@@ -1,0 +1,48 @@
+// Every number on the Results page, measured at ShellHacks 2026 (Sep 27) with scripts/run-stats.ts,
+// `repro report`, and `npm run scan:lane2`. Estimates are labelled and show their arithmetic.
+
+export const RESULTS = {
+  run: {
+    target: "Bomoga/repro-demo",
+    note: "Full pipeline on Gemini (Google sign-in). Stopped after 20 minutes of repair to restart the control plane, so the totals cover 13 repair attempts across 9 of 15 diagnoses.",
+    findings: 29,
+    reproduced: 29,
+    detectors: { semgrep: 12, ruff: 11, "privacy-patterns": 4, gitleaks: 2 },
+    severity: { high: 9, medium: 17, low: 3 },
+    diagnoses: 15,
+    attempts: 13,
+    verified: 2,
+    merged: 2,
+    rejected: 9,
+    rejectedBeforeChallenger: 4,
+    challengerDisputes: 5,
+    regressionsCaught: 5,
+    stillReproduced: 2,
+    stageSeconds: { ingest: 2, detect: 26, diagnose: 141, repair: 1042 },
+  },
+  tokens: {
+    total: 3_910_549,
+    input: 3_522_703,
+    output: 45_162,
+    thought: 342_684,
+    cached: 1_677_547,
+    requests: 257,
+    pro: 61,
+    flash: 196,
+    byRole: { diagnose: 36_803, repair: 3_107_802, challenger: 765_944 },
+    perRepairAttempt: 239_062,
+    perChallenge: 85_105,
+    perVerifiedFix: 1_955_275,
+  },
+  saved: {
+    detection: { label: "Finding and reproducing 29 issues", tokens: 0, how: "Scanners and the sandbox, no model: 0 tokens for detection and reproduction." },
+    grouping: { label: "Grouping 29 findings into 15 root causes", tokens: 3_346_864, how: "14 fewer repair sessions × 239,062 tokens per measured attempt." },
+    gate: { label: "Rejecting bad patches before the Challenger", tokens: 340_420, how: "4 patches failed the deterministic checks × 85,105 tokens per measured challenge." },
+    cache: { label: "Served from Gemini's context cache", tokens: 1_677_547, how: "47.6% of input tokens were cache hits, billed at the cached rate." },
+  },
+  benchmarks: [
+    { repo: "appsecco/dvna", files: 151, findings: 11, reproduced: 11, seconds: 42 },
+    { repo: "we45/Vulnerable-Flask-App", files: 19, findings: 98, reproduced: 98, seconds: 51 },
+    { repo: "OWASP/NodeGoat", files: 111, findings: 306, reproduced: null as number | null, seconds: null as number | null },
+  ],
+};

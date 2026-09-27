@@ -8,11 +8,12 @@ export const GITHUB_URL = import.meta.env.VITE_GITHUB_URL ?? "https://github.com
 /** "Sample report" is a real finished run in the dashboard, opened on its Report tab. */
 export const SAMPLE_REPORT_URL = `${DASHBOARD_URL}/#/overview/run_demo_completed/report`;
 
-export const PAGES = ["home", "download", "docs", "pricing", "faq", "credits"] as const;
+export const PAGES = ["home", "download", "docs", "results", "pricing", "faq", "credits"] as const;
 export type Page = (typeof PAGES)[number];
 
 export const NAV: { label: string; page?: Page; href?: string }[] = [
   { label: "Docs", page: "docs" },
+  { label: "Results", page: "results" },
   { label: "Sample report", href: SAMPLE_REPORT_URL },
   { label: "Pricing", page: "pricing" },
   { label: "FAQ", page: "faq" },
@@ -23,6 +24,7 @@ export const PAGE_TITLE: Record<Page, string> = {
   home: "Repro · Proof, not promises.",
   download: "Get Repro",
   docs: "Repro docs · Quickstart",
+  results: "Repro results · ShellHacks 2026",
   pricing: "Repro pricing",
   faq: "Repro FAQ",
   credits: "Repro credits",
@@ -126,7 +128,7 @@ export const RECEIPT = [
   { k: "Repro", v: "$0" },
   { k: "Semgrep, gitleaks", v: "$0" },
   { k: "Sandbox (your Docker)", v: "$0" },
-  { k: "Model tokens / verified fix", v: "≈ $0.19" },
+  { k: "Gemini tokens / verified fix", v: "1.96M (measured)" },
   { k: "Seats, accounts, telemetry", v: "none" },
 ];
 
