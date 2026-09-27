@@ -6,7 +6,7 @@ export const INSTALL_COMMAND = "curl -fsSL repro.miami/install | sh";
 export const GITHUB_URL = import.meta.env.VITE_GITHUB_URL ?? "https://github.com/Bomoga/repro";
 
 
-export const PAGES = ["home", "download", "docs", "results", "report", "pricing", "faq", "credits"] as const;
+export const PAGES = ["home", "download", "docs", "results", "report", "pricing", "faq", "credits", "legal"] as const;
 export type Page = (typeof PAGES)[number];
 
 export const NAV: { label: string; page?: Page; href?: string }[] = [
@@ -27,6 +27,7 @@ export const PAGE_TITLE: Record<Page, string> = {
   pricing: "Repro pricing",
   faq: "Repro FAQ",
   credits: "Repro credits",
+  legal: "Repro legal · terms and privacy",
 };
 
 export const VERSION = "0.1.0";
