@@ -10,7 +10,9 @@ The Run Orchestrator from `CLAUDE.md` section 3. It polls the Run Store for queu
 | `repair` / `verify` | Lane 3's `repairAndVerify`, per Diagnosis whose Findings all reproduced: two attempts at most, the Challenger's counter-tests, the gate | each attempt's Patch: `proposed` while the Challenger works, then `verified` or `rejected` |
 | `done` | a PR for each verified Patch on a GitHub target, when enabled | the Patch's `prUrl` |
 
-A stage that throws fails the Run where it stands. A Repair that throws is logged and skipped; the Run fails only if every Repair did. A PR that can't be opened is logged and never fails the Run. Every Gemini interaction, tool call, counter-test, and stage event goes to the Run's log in the Run Store (section 9).
+A stage that throws fails the Run where it stands. A Repair that throws is logged and skipped; the Run fails only if every Repair did. A PR that can't be opened is logged and never fails the Run. Every Gemini interaction, tool call, counter-test, and stage event goes to the Run's log in the Run Store (section 9), and the log ends with the Run's Gemini request count per model.
+
+Two things end the repairs early. When the Run's Pro-tier request budget (`REPRO_PRO_REQUEST_BUDGET`) can't cover another diagnosis, or runs out in the middle of one, the Run stops scheduling repairs, logs `budget-reached` with the counts and how many diagnoses it skipped, opens PRs for the patches already verified, and completes. When a Gemini daily quota runs out, it does the same and then fails, with the quota's message. A diagnosis already in flight when either happens is cut short.
 
 ## Running it
 
@@ -30,6 +32,7 @@ Then queue work the usual way: `npm run cli -- scan <path | owner/repo>` or the 
 | `REPRO_GITHUB_TOKEN` | Turns on PRs for verified Patches on GitHub targets, and polls them for a person's merge or close. Needs contents and pull-request write access on the target repo, nothing more. |
 | `REPRO_GITHUB_WEBHOOK_SECRET` | Also takes GitHub's `pull_request` webhook at `POST /github/webhook`. |
 | `REPRO_KEEP_WORKSPACES=1` | Keep each Run's clone under `~/.repro/workspaces` for debugging. |
+| `REPRO_PRO_REQUEST_BUDGET` | The most requests one Run sends to the Pro-tier models, the ones behind Diagnose and the Challenger after any `REPRO_MODEL_*` override: every attempt, retry, and background poll counts. A positive integer; unset means no cap. Before each diagnosis the Run checks that what's left covers one diagnosis's worst case, 2 attempts × (10 Challenger tool calls + 3) = 26 requests. Keep it under the project's daily quota: 220 leaves room on a 250-a-day Tier 1 project. |
 
 ## Pull requests
 

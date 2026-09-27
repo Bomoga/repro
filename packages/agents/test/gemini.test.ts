@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   GeminiError,
   MemoryInteractionLog,
+  RequestBudget,
   createGeminiClient,
+  isBudgetExhausted,
   isDailyQuotaExhausted,
   modelFor,
   parseStructured,
@@ -255,6 +257,66 @@ describe("createGeminiClient", () => {
       }),
     ).rejects.toMatchObject({ status: 500 });
     expect(flaky.calls).toHaveLength(3);
+  });
+});
+
+describe("the request budget", () => {
+  const ask = (role: "diagnose" | "challenger" | "repair" | "narrator") => ({ role, systemInstruction: "s", input: "i" });
+
+  it("counts every request to a Pro-tier model, retries included, and refuses to send the one past the cap", async () => {
+    const { sdk, calls } = fakeSdk(httpError(503, "unavailable"), completed, completed, completed, completed);
+    const budget = new RequestBudget(3);
+    const log = new MemoryInteractionLog();
+    const sleep = vi.fn(async () => {});
+    const client = createGeminiClient({ sdk, env: {}, budget, log, sleep });
+
+    await client.interact(ask("diagnose")); // a 503, then its retry: two requests
+    await client.interact(ask("repair")); // Flash: counted, not capped
+    await client.interact(ask("challenger"));
+    expect(budget.proRequests).toBe(3);
+    expect(budget.remaining).toBe(0);
+
+    sleep.mockClear();
+    const failure = await client.interact(ask("challenger")).catch((error: unknown) => error);
+    expect(isBudgetExhausted(failure)).toBe(true);
+    expect(failure).toMatchObject({ name: "RequestBudgetExhaustedError", retryable: false, limit: 3, model: "gemini-3.1-pro-preview" });
+    expect(sleep).not.toHaveBeenCalled(); // not retried
+    expect(calls).toHaveLength(4); // the refused request never went out
+    expect(log.entries.at(-1)?.error?.message).toContain("budget of 3 Pro-tier requests is spent");
+    expect(budget.requestsByModel()).toEqual({ "gemini-3.1-pro-preview": 3, "gemini-3.8-flash": 1 });
+
+    // A spent Pro budget doesn't stop the other models.
+    await expect(client.interact(ask("narrator"))).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("counts background polls, and stops polling when the budget runs out", async () => {
+    const { sdk, polls } = fakeSdk({ id: "int-bg", status: "in_progress", steps: [] });
+    polls.push({ id: "int-bg", status: "in_progress", steps: [] }, { id: "int-bg", status: "in_progress", steps: [] }, completed);
+    const budget = new RequestBudget(3);
+    const client = createGeminiClient({ sdk, env: {}, transport: "background", budget, sleep: async () => {} });
+    await expect(client.interact(ask("diagnose"))).rejects.toSatisfy(isBudgetExhausted);
+    expect(sdk.interactions.create).toHaveBeenCalledTimes(1);
+    expect(sdk.interactions.get).toHaveBeenCalledTimes(2); // create + 2 polls = 3; the third poll wasn't sent
+    expect(budget.proRequests).toBe(3);
+  });
+
+  it("follows the Pro-tier roles' env overrides to whatever model they name", async () => {
+    const env = { REPRO_MODEL_DIAGNOSE: "gemini-3.8-flash", REPRO_MODEL_CHALLENGER: "gemini-3.8-flash" };
+    const budget = new RequestBudget(1);
+    const client = createGeminiClient({ sdk: fakeSdk(completed, completed).sdk, env, budget });
+    // Repair shares the Pro roles' model now, so it spends the same quota.
+    await client.interact(ask("repair"));
+    await expect(client.interact(ask("repair"))).rejects.toSatisfy(isBudgetExhausted);
+  });
+
+  it("only counts when it has no cap", async () => {
+    const budget = new RequestBudget();
+    const client = createGeminiClient({ sdk: fakeSdk(completed, completed, completed).sdk, env: {}, budget });
+    for (let i = 0; i < 3; i++) await client.interact(ask("challenger"));
+    expect(budget.remaining).toBe(Infinity);
+    expect(budget.requestsByModel()).toEqual({ "gemini-3.1-pro-preview": 3 });
+    expect(() => new RequestBudget(0)).toThrow(/positive integer/);
+    expect(() => new RequestBudget(2.5)).toThrow(/positive integer/);
   });
 });
 

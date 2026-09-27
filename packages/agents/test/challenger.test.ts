@@ -6,12 +6,20 @@ import { repair, type RepairResult } from "../src/repair/repair.js";
 import { challenge } from "../src/verify/challenger.js";
 import { NO_COUNTER_TEST_NUDGE } from "../src/verify/prompt.js";
 import type { CounterTest } from "../src/verify/counter-tests.js";
-import { SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
+import { KEY_DIAGNOSIS, SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
 import { JOINED_FIX, SOUND_FIX, counterTest, verdict } from "./fixtures/scripts.js";
 import { FixtureExecutor, demoTargetHandlers } from "./helpers/executor.js";
 import { scriptedGemini, type ScriptedReply } from "./helpers/gemini.js";
 import { git, materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
+
+/** The files the Challenger's first input carries, between their heading and the next section. */
+function preloadedSection(input: string): string {
+  const start = input.indexOf("# The patched files and the tests that mention them");
+  const end = input.indexOf("# Deterministic results the harness already has");
+  expect(start).toBeGreaterThanOrEqual(0);
+  return input.slice(start, end);
+}
 
 describe("challenge", () => {
   let fixture: FixtureWorkspace;
@@ -62,6 +70,12 @@ describe("challenge", () => {
     expect(attack.responseSchema).toBeUndefined();
     expect(attack.input).toContain("# The patch under review");
     expect(attack.input).not.toContain("Parameterized both queries"); // the repair agent's own words stay out
+    // The patched file and its tests come up front, so attacking them costs no read_file request.
+    const preloaded = preloadedSection(attack.input as string);
+    expect(preloaded).toMatch(/^src\/db\.js \(\d+ lines\)\n```\n'use strict';/m);
+    expect(preloaded).toContain("  const rows = db.query(sql, [noteId]);");
+    expect(preloaded).not.toContain("' + noteId;");
+    expect(preloaded).toContain("test/db.test.js (");
     const verdictRequest = scripted.requests.at(-1)!;
     expect(verdictRequest.tools).toBeUndefined();
     expect(verdictRequest.responseSchema).toMatchObject({ properties: { verdict: { enum: ["confirmed", "disputed"] } } });
@@ -69,6 +83,29 @@ describe("challenge", () => {
     expect(git(fixture.workspace.path, "diff", "--no-color", "--no-ext-diff", "--no-textconv", fixture.workspace.headCommit)).toBe(result.patch.diff);
     expect(existsSync(path.join(fixture.workspace.path, "test/repro-counter-1.test.js"))).toBe(false);
     expect(existsSync(path.join(fixture.workspace.path, ".repro"))).toBe(false);
+  });
+
+  it("hands over the patched files with every secret still redacted", async () => {
+    const { gemini } = scriptedGemini({
+      repair: [
+        [{ name: "replace_in_file", args: { path: "src/config.js", old_text: "model: 'demo-chat-1',", new_text: "model: 'demo-chat-2'," } }],
+        [{ name: "finish", args: { summary: "Switched models." } }],
+      ],
+    });
+    const repaired = await repair(
+      { diagnosis: KEY_DIAGNOSIS, findings: FIXTURE_FINDINGS, workspace: fixture.workspace },
+      { gemini, executor, detectors: [], newId: () => "patch-under-review" },
+    );
+    const scripted = scriptedGemini({ challenger: [[], [], verdict("disputed")] });
+    await challenge(
+      { patch: repaired.patch, diagnosis: KEY_DIAGNOSIS, findings: FIXTURE_FINDINGS, workspace: fixture.workspace, testCommand: "npm test" },
+      { gemini: scripted.gemini, executor },
+    );
+
+    const preloaded = preloadedSection(scripted.requests[0]!.input as string);
+    expect(preloaded).toContain("  model: 'demo-chat-2',");
+    expect(preloaded).toContain("  OPENAI_API_KEY: '[REDACTED-SECRET-1]',");
+    expect(JSON.stringify(scripted.requests)).not.toContain(PLANTED_SECRET);
   });
 
   it("catches a fix that fools the detector but still splices the id into SQL", async () => {

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { GeminiError } from "@repro/agents";
-import { processRun } from "../src/pipeline.ts";
+import type { InMemoryRunStore } from "@repro/api";
+import { PRO_REQUESTS_PER_DIAGNOSIS, processRun } from "../src/pipeline.ts";
 import type { PullRequestInput } from "../src/pull-request.ts";
-import { aDiagnosis, disputedThenVerified, harness } from "./helpers.ts";
+import { aDiagnosis, disputedThenVerified, harness, sdkBackedGemini, spendingRepair } from "./helpers.ts";
 
 describe("processRun", () => {
   it("takes a claimed run through every stage and ends it completed at done", async () => {
@@ -66,6 +67,7 @@ describe("processRun", () => {
       "counter-test",
       "stage",
       "stage",
+      "gemini-requests",
       "completed",
     ]);
     expect(logs.find((l) => (l.entry as { event?: string }).event === "detected")?.entry).toMatchObject({
@@ -173,5 +175,81 @@ describe("processRun", () => {
     deps.keepWorkspace = true;
     await processRun(await queue(), deps);
     expect(deps.stages.removeWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("processRun when Gemini requests run short", () => {
+  /** Diagnoses that all cite the reproduced finding, on the real wrapper, with a PR opener. */
+  const repairable = (...ids: string[]) => {
+    const h = harness();
+    h.deps.stages.diagnose = vi.fn(async (_input, { gemini }) => {
+      await gemini.interact({ role: "diagnose", systemInstruction: "diagnose", input: "findings" });
+      return { diagnoses: ids.map((id) => aDiagnosis(id, ["fnd_sqli"])), dropped: [], uncoveredFindingIds: [], attempts: 1 };
+    });
+    h.deps.gemini = sdkBackedGemini();
+    const open = vi.fn(async (input: PullRequestInput) => `https://github.com/octo/example/pull/${input.diagnosis.id}`);
+    h.deps.pullRequests = { open };
+    return { ...h, open };
+  };
+  const events = async (store: InMemoryRunStore, runId: string) =>
+    (await store.listLogs(runId)).filter((l) => l.kind === "orchestrator").map((l) => l.entry as { event: string } & Record<string, unknown>);
+
+  it("stops scheduling repairs the budget can't cover, opens PRs for what's verified, and completes", async () => {
+    const h = repairable("diag_a", "diag_b", "diag_c");
+    h.deps.proRequestBudget = 30;
+    h.deps.stages.repairAndVerify = vi.fn(spendingRepair(10));
+    const run = await h.queue();
+    expect(await processRun(run, h.deps)).toMatchObject({ stage: "done", status: "completed" });
+
+    // Diagnose's 1 and diag_a's 10 leave 19, short of one diagnosis's worst case.
+    expect(PRO_REQUESTS_PER_DIAGNOSIS).toBe(26);
+    expect(h.deps.stages.repairAndVerify).toHaveBeenCalledTimes(1);
+    expect(h.open.mock.calls.map(([input]) => input.patch.id)).toEqual(["diag_a_patch_2"]);
+    const logged = await events(h.store, run.id);
+    expect(logged.find((e) => e.event === "budget-reached")).toEqual({
+      event: "budget-reached",
+      proLimit: 30,
+      proRequests: 11,
+      byModel: { "gemini-3.1-pro-preview": 11 },
+      verified: 1,
+      diagnosesSkipped: 2,
+    });
+    expect(logged.map((e) => e.event).slice(-4)).toEqual(["budget-reached", "pull-request", "gemini-requests", "completed"]);
+    expect(logged.at(-2)).toEqual({ event: "gemini-requests", byModel: { "gemini-3.1-pro-preview": 11 }, proRequests: 11, proLimit: 30 });
+  });
+
+  it("stops the same way when the budget runs out in the middle of a diagnosis", async () => {
+    const h = repairable("diag_a", "diag_b", "diag_c");
+    h.deps.proRequestBudget = 32;
+    h.deps.stages.repairAndVerify = vi.fn(async (input, repairDeps) =>
+      spendingRepair(input.diagnosis.id === "diag_a" ? 5 : "until-spent")(input, repairDeps),
+    );
+    const run = await h.queue();
+    expect(await processRun(run, h.deps)).toMatchObject({ stage: "done", status: "completed" });
+
+    expect(h.deps.stages.repairAndVerify).toHaveBeenCalledTimes(2);
+    expect(h.open).toHaveBeenCalledTimes(1);
+    const logged = await events(h.store, run.id);
+    expect(logged.find((e) => e.event === "budget-reached")).toMatchObject({ proRequests: 32, verified: 1, diagnosesSkipped: 1, interrupted: "diag_b" });
+    expect(logged.map((e) => e.event)).not.toContain("repair-failed");
+  });
+
+  it("on a spent daily quota, stops scheduling, opens PRs for what's verified, then fails the run", async () => {
+    const h = repairable("diag_a", "diag_b", "diag_c");
+    h.deps.stages.repairAndVerify = vi.fn(async (input, repairDeps) => {
+      if (input.diagnosis.id === "diag_b") {
+        throw new GeminiError("Rate limit exceeded for model gemini-3.1-pro (limit: 250 requests per day on Tier 1).", 429, false);
+      }
+      return disputedThenVerified(input, repairDeps);
+    });
+    const run = await h.queue();
+    expect(await processRun(run, h.deps)).toMatchObject({ stage: "repair", status: "failed" });
+
+    expect(h.deps.stages.repairAndVerify).toHaveBeenCalledTimes(2); // diag_c never starts
+    expect(h.open.mock.calls.map(([input]) => input.patch.id)).toEqual(["diag_a_patch_2"]);
+    expect(await h.store.getPatch("diag_a_patch_2")).toMatchObject({ prUrl: "https://github.com/octo/example/pull/diag_a" });
+    const logged = await events(h.store, run.id);
+    expect(logged.map((e) => e.event).slice(-3)).toEqual(["pull-request", "gemini-requests", "failed"]);
+    expect(logged.at(-1)).toMatchObject({ stage: "repair", message: expect.stringContaining("250 requests per day") });
   });
 });

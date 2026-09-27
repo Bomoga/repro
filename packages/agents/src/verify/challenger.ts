@@ -12,6 +12,7 @@ import {
   type Workspace,
 } from "../contracts.js";
 import { fence } from "../diagnose/prompt.js";
+import { readFilesForPrompt, relatedTestFiles } from "../file-context.js";
 import { parseStructured, toGeminiSchema, type FunctionCall, type FunctionTool, type GeminiClient, type InputItem } from "../gemini.js";
 import { Sandbox } from "../sandbox.js";
 import { WorkspaceFiles, WorkspacePathError, splitLines } from "../workspace-files.js";
@@ -110,11 +111,14 @@ export async function challenge(input: ChallengeInput, deps: ChallengeDeps): Pro
       }
     }
 
+    // The runner leaves the patched tree in place after every run, so these are the files under attack.
+    const preloaded = await readFilesForPrompt(files, [...patch.filesChanged, ...(await relatedTestFiles(files, patch.filesChanged))]);
     let next: string | InputItem[] = renderChallengeInput({
       findings: cited,
       diagnosis,
       patch,
       fileIndex: input.workspace.fileIndex,
+      preloaded,
       testCommand: input.testCommand,
       replayed,
       maxCounterTests,
