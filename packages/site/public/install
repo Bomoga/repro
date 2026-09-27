@@ -2,12 +2,14 @@
 # Repro installer: curl -fsSL repro.miami/install | sh
 #
 # Clones Repro into ~/.repro/app, installs its dependencies, builds the Docker sandbox every
-# target command runs in, and puts a `repro` command in ~/.local/bin. Run it again to update.
+# target command runs in, installs the Repro desktop app (app menu on Linux, ~/Applications on
+# macOS), puts a `repro` command in ~/.local/bin and opens the app. Run it again to update.
 #
 #   REPRO_HOME           where Repro lives (default ~/.repro/app)
 #   REPRO_BIN_DIR        where the `repro` command goes (default ~/.local/bin)
 #   REPRO_REF            the branch or tag to install (default main)
 #   REPRO_SKIP_SANDBOX=1 skip building the sandbox image (scans need it; `repro sandbox` builds it later)
+#   REPRO_NO_LAUNCH=1    don't open the app when the install finishes
 set -eu
 
 REPO="https://github.com/Bomoga/repro.git"
@@ -39,6 +41,12 @@ fi
 say "installing dependencies (a minute or two)"
 (cd "$REPRO_HOME" && npm ci --no-audit --no-fund --loglevel=error >/dev/null)
 
+say "building the dashboard"
+(cd "$REPRO_HOME" && npm run --silent build -w @repro/web >/dev/null)
+
+say "downloading the desktop app runtime"
+"$REPRO_HOME/node_modules/.bin/electron" --version >/dev/null 2>&1 || say "couldn't fetch it now; the app fetches it on first launch"
+
 if [ "${REPRO_SKIP_SANDBOX:-0}" != "1" ]; then
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     say "building the sandbox image (first time: a few minutes)"
@@ -48,20 +56,32 @@ if [ "${REPRO_SKIP_SANDBOX:-0}" != "1" ]; then
   fi
 fi
 
+NODE_DIR="$(dirname "$(command -v node)")"
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/repro" <<EOF
 #!/bin/sh
 # Installed by repro.miami/install
 REPRO_HOME="$REPRO_HOME"
+# Launched from the app menu, the desktop's PATH may not have Node (nvm, Homebrew): use the one
+# Repro was installed with.
+export PATH="$NODE_DIR:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+electron_flags() {
+  # Ubuntu 23.10+ blocks the unprivileged namespaces Chromium's sandbox needs unless its helper is
+  # setuid root; there, run without it, as any npm-installed Electron app has to.
+  s="\$REPRO_HOME/node_modules/electron/dist/chrome-sandbox"
+  if [ "\$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ] && [ ! -u "\$s" ]; then echo --no-sandbox; fi
+}
 case "\${1:-}" in
-  up|start) cd "\$REPRO_HOME" && exec npm run --silent demo ;;
+  app|gui|up|start) cd "\$REPRO_HOME" && exec "\$REPRO_HOME/node_modules/.bin/electron" \$(electron_flags) "\$REPRO_HOME/packages/desktop" ;;
+  serve) cd "\$REPRO_HOME" && exec npm run --silent demo ;;
   demo) cd "\$REPRO_HOME" && exec npm run --silent dev:all ;;
   sandbox) cd "\$REPRO_HOME" && exec docker build -t repro-sandbox:dev sandbox ;;
   update) exec sh -c "curl -fsSL https://repro.miami/install | sh" ;;
   --version|version) printf 'repro %s\n' "\$(node -p "require('\$REPRO_HOME/package.json').version")" ;;
   ""|help|--help|-h)
     cat <<'HELP'
-repro up                 start Repro: control plane, dashboard (http://localhost:5173), site
+repro app                open the Repro desktop app (starts the control plane too)
+repro serve              run headless instead: control plane + dashboard on http://localhost:5173
 repro demo               the dashboard over demo runs, no Docker or Gemini needed
 repro scan <target>      queue a scan (owner/repo or /absolute/path) on a running control plane
 repro status             list runs;  repro watch, repro report, repro patch: see --help
@@ -74,6 +94,55 @@ esac
 EOF
 chmod +x "$BIN_DIR/repro"
 
+ICON="$REPRO_HOME/packages/desktop/icon.png"
+case "$(uname -s)" in
+  Linux)
+    APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
+    mkdir -p "$APPS" "$ICONS"
+    cp "$ICON" "$ICONS/repro.png"
+    cat > "$APPS/repro.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Repro
+GenericName=Code repair
+Comment=Find, reproduce and fix bugs with proof
+Exec="$BIN_DIR/repro" app
+Icon=repro
+Terminal=false
+Categories=Development;
+StartupWMClass=Repro
+EOF
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$APPS" 2>/dev/null || true
+    say "added Repro to your app menu"
+    ;;
+  Darwin)
+    APP="$HOME/Applications/Repro.app"
+    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+    printf '#!/bin/sh\nexec "%s" app\n' "$BIN_DIR/repro" > "$APP/Contents/MacOS/Repro"
+    chmod +x "$APP/Contents/MacOS/Repro"
+    if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+      SET="$(mktemp -d)/repro.iconset"
+      mkdir -p "$SET"
+      for n in 16 32 128 256 512; do sips -z $n $n "$ICON" --out "$SET/icon_${n}x${n}.png" >/dev/null; done
+      iconutil -c icns "$SET" -o "$APP/Contents/Resources/repro.icns" 2>/dev/null || true
+    fi
+    cat > "$APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>Repro</string>
+  <key>CFBundleIdentifier</key><string>miami.repro.app</string>
+  <key>CFBundleExecutable</key><string>Repro</string>
+  <key>CFBundleIconFile</key><string>repro</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+</dict></plist>
+EOF
+    say "installed Repro.app in ~/Applications"
+    ;;
+esac
+
 say "installed: $("$BIN_DIR/repro" --version)"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -82,8 +151,13 @@ esac
 cat <<EOF
 
   Next:
-    repro up            start Repro, then open http://localhost:5173
-                        (sign in with Google there, or put GEMINI_API_KEY in $REPRO_HOME/.env)
+    Open Repro from your app menu, or run: repro app
+      (sign in with Google in the app, or put GEMINI_API_KEY in $REPRO_HOME/.env)
     repro demo          just look around, with demo data
 
 EOF
+
+if [ "${REPRO_NO_LAUNCH:-0}" != "1" ] && { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || [ "$(uname -s)" = Darwin ]; }; then
+  say "opening Repro"
+  nohup "$BIN_DIR/repro" app >/dev/null 2>&1 &
+fi
