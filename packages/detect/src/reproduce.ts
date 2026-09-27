@@ -88,10 +88,16 @@ export async function reproduce(
     };
   }
 
+  // Canary tracing (repro-canary) runs the target's code and reads what it wrote to the shared
+  // workspace, so those runs go one at a time, after everything else: a concurrent run's files can't
+  // be mistaken for, or cleaned up as, the canary's.
+  const exclusive = (i: number) => findings[i]!.reproductionCommand?.startsWith("repro-canary ") === true;
+  const shared = findings.map((_, i) => i).filter((i) => !exclusive(i));
   let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, findings.length) }, async () => {
-    while (next < findings.length) await one(next++);
+  const workers = Array.from({ length: Math.min(concurrency, shared.length) }, async () => {
+    while (next < shared.length) await one(shared[next++]!);
   });
   await Promise.all(workers);
+  for (let i = 0; i < findings.length; i++) if (exclusive(i)) await one(i);
   return { findings: out, attempts };
 }

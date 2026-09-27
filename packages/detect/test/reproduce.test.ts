@@ -89,4 +89,26 @@ describe("reproduce", () => {
     const { findings } = await reproduce(many, seededWorkspace, exec, { concurrency: 3 });
     expect(findings.map((f) => f.id)).toEqual(many.map((f) => f.id));
   });
+
+  it("runs canary reproductions alone, after the rest, so their workspace reads can't interfere", async () => {
+    let running = 0;
+    const log: string[] = [];
+    const exec = new FakeExecutor(async (req) => {
+      running++;
+      if (req.command.startsWith("repro-canary")) log.push(`canary alone=${running === 1}`);
+      await new Promise((r) => setTimeout(r, 10));
+      running--;
+      return { exitCode: 0 };
+    });
+    const mixed = [
+      finding({ id: "a", reproductionCommand: "repro-canary 'prompt-logging' 'x.py' 'f' '1'" }),
+      finding({ id: "b" }),
+      finding({ id: "c", reproductionCommand: "repro-canary 'prompt-logging' 'y.py' 'g' '1'" }),
+      finding({ id: "d" }),
+    ];
+    const { findings } = await reproduce(mixed, seededWorkspace, exec, { concurrency: 4 });
+    expect(findings.map((f) => f.id)).toEqual(["a", "b", "c", "d"]);
+    expect(log).toEqual(["canary alone=true", "canary alone=true"]);
+    expect(exec.requests.map((r) => r.command.startsWith("repro-canary"))).toEqual([false, false, true, true]);
+  });
 });

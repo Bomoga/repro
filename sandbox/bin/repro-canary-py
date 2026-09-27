@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Python half of repro-canary: call one function with a canary as user input, and record where
+the canary went. Not run directly; repro-canary runs it and judges the result.
+
+Usage: repro-canary-py <file> <function> <canary> <report.json>
+
+Sinks recorded: log records (the root logger, at DEBUG), anything printed to stdout/stderr, and
+outbound HTTP through http.client (which requests, urllib3, and urllib all sit on): the request is
+captured with its payload and never sent. Files written are found by repro-canary itself, by
+comparing the file tree before and after.
+"""
+import asyncio
+import contextlib
+import http.client
+import importlib
+import importlib.util
+import inspect
+import io
+import json
+import logging
+import os
+import signal
+import socket
+import sys
+import traceback
+
+FILE, FUNCTION, CANARY, REPORT = sys.argv[1:5]
+ROOT = os.getcwd()
+report = {"called": False, "returned": False, "error": None, "logs": [], "requests": []}
+
+# --- outbound HTTP: capture the request, never connect -------------------------------------------
+_pending = {}
+
+
+def _send(self, data):
+    buf = _pending.setdefault(id(self), {"host": self.host, "port": self.port, "data": b""})
+    buf["data"] += data if isinstance(data, bytes) else str(data).encode()
+
+
+def _connect(self):
+    _pending.setdefault(id(self), {"host": self.host, "port": self.port, "data": b""})
+
+
+def _getresponse(self, *args, **kwargs):
+    buf = _pending.pop(id(self), {"host": self.host, "port": self.port, "data": b""})
+    report["requests"].append({"host": buf["host"], "port": buf["port"], "payload": buf["data"].decode("utf-8", "replace")})
+    raise ConnectionRefusedError(f"repro-canary: outbound connection to {buf['host']} blocked")
+
+
+http.client.HTTPConnection.send = _send
+http.client.HTTPConnection.connect = _connect
+http.client.HTTPConnection.getresponse = _getresponse
+
+
+def _no_socket(*args, **kwargs):
+    target = args[0] if args else kwargs.get("address")
+    report["requests"].append({"host": str(target), "port": None, "payload": ""})
+    raise ConnectionRefusedError("repro-canary: raw socket connection blocked")
+
+
+socket.create_connection = _no_socket
+
+# --- logs --------------------------------------------------------------------------------------------
+class _Capture(logging.Handler):
+    def emit(self, record):
+        try:
+            report["logs"].append(self.format(record))
+        except Exception:
+            report["logs"].append(str(record.msg))
+
+
+logging.basicConfig(level=logging.DEBUG, handlers=[_Capture()], force=True)
+
+
+# --- the call ----------------------------------------------------------------------------------------
+def load_module(path):
+    rel = os.path.relpath(os.path.abspath(path), ROOT)
+    parts = rel[:-3].split(os.sep)
+    in_package = all(os.path.isfile(os.path.join(ROOT, *parts[:i], "__init__.py")) for i in range(1, len(parts)))
+    sys.path.insert(0, ROOT)
+    if in_package and len(parts) > 1:
+        return importlib.import_module(".".join(parts))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
+    spec = importlib.util.spec_from_file_location(parts[-1], path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[parts[-1]] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+CONVERSATION = ("message", "history", "conversation", "chat", "transcript", "turns")
+USER_CONTENT = ("prompt", "question", "query", "input", "text", "content", "body", "message", "msg", "note")
+PATHLIKE = ("path", "file", "filename", "dest", "out", "target")
+IDLIKE = ("user", "uid", "owner", "session", "account", "id")
+
+
+def argument_for(name, param):
+    lower = name.lower()
+    if any(k in lower for k in PATHLIKE):
+        os.makedirs("/tmp/repro-canary", exist_ok=True)
+        return f"/tmp/repro-canary/{name}.out"
+    if (any(k in lower for k in CONVERSATION) and lower.endswith("s")) or lower in ("history", "conversation", "transcript", "chat"):
+        return [{"role": "user", "content": CANARY}]
+    if any(k in lower for k in USER_CONTENT):
+        return CANARY
+    if param.default is not inspect.Parameter.empty:
+        return param.default
+    if any(k in lower for k in IDLIKE):
+        return "repro-canary-user"
+    return CANARY
+
+
+def _timeout(*_):
+    raise TimeoutError("the call took longer than 20s")
+
+
+def main():
+    signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(20)
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            module = load_module(FILE)
+            fn = getattr(module, FUNCTION)
+            params = inspect.signature(fn).parameters
+            args = {
+                name: argument_for(name, p)
+                for name, p in params.items()
+                if p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+            }
+            report["called"] = True
+            result = fn(**args)
+            if inspect.isawaitable(result):
+                asyncio.run(result)
+            report["returned"] = True
+    except BaseException as error:  # the target's exceptions are data here
+        report["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()[:500]
+    finally:
+        signal.alarm(0)
+        for buf in _pending.values():
+            report["requests"].append({"host": buf["host"], "port": buf["port"], "payload": buf["data"].decode("utf-8", "replace")})
+        report["logs"] += [line for line in (out.getvalue() + err.getvalue()).splitlines() if line.strip()]
+        with open(REPORT, "w") as fh:
+            json.dump(report, fh)
+
+
+main()

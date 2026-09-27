@@ -19,7 +19,9 @@ describe("privacy-patterns adapter", () => {
     for (const f of findings) {
       expect(f.detectorId).toBe("privacy-patterns");
       expect(f.category).toBe("privacy");
-      expect(f.reproductionCommand).toMatch(/^repro-semgrep-rule 'privacy-patterns' /);
+      // Python/JS findings inside a callable function reproduce by canary tracing; the rest (the
+      // TypeScript file here, OAuth scopes) keep the Semgrep re-run.
+      expect(f.reproductionCommand).toMatch(f.file.endsWith(".py") ? /^repro-canary / : /^repro-semgrep-rule 'privacy-patterns' /);
     }
   });
 });
