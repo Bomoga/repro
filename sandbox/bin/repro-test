@@ -8,13 +8,17 @@ Usage:
 The test command comes from package.json's "test" script, split on && / ; / ||, so one failing
 runner doesn't hide the next. With no test script, Python tests run under pytest if the project
 installed it, otherwise unittest. Runners understood test by test: node --test (TAP), python -m
-unittest (-v), pytest (-rfE). Anything else (jest, vitest, mocha, ...) is run as a whole: a failing
-command becomes one Finding on package.json's test script.
+unittest (-v), pytest (-rfE). Anything else (jest, vitest, mocha, ...) is run as a whole, the way
+`npm test` would run it (node_modules/.bin first on PATH): a failing command becomes one Finding on
+package.json's test script. A command that couldn't be run at all (exit 126 or 127: the runner isn't
+installed, or isn't executable) is a setup problem, never a failing test: `scan` stops with exit 2
+so the detector reports it, and `check` answers "could not tell".
 
 `check` follows the same protocol as the other repro-* helpers:
   exit 1  "REPRODUCED ..." line         the test still fails
   exit 0  "NOT REPRODUCED ..." line     it passes
-  exit 2  reason on stderr              could not tell (the test is gone, the run timed out, ...)
+  exit 2  reason on stderr              could not tell (the test is gone, the run timed out, the
+                                        runner couldn't be started, ...)
 """
 import json
 import os
@@ -25,6 +29,8 @@ import sys
 
 TIMEOUT = 600
 WORKSPACE = os.getcwd()
+# sh's exit codes for "found but not executable" and "not found": the command never ran.
+COULD_NOT_RUN = (126, 127)
 
 
 def fail(msg: str) -> None:
@@ -32,11 +38,19 @@ def fail(msg: str) -> None:
     sys.exit(2)
 
 
-def run(argv, cwd=None):
+def run(argv, cwd=None, env=None):
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd or WORKSPACE)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd or WORKSPACE, env=env)
     except subprocess.TimeoutExpired:
         fail(f"timed out after {TIMEOUT}s: {' '.join(argv)[:200]}")
+
+
+def npm_script_env():
+    """The environment npm gives a package.json script: the project's installed node_modules/.bin
+    first on PATH, so `jest`, `vitest`, `mocha` and friends resolve the way they do under `npm test`."""
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([os.path.join(WORKSPACE, "node_modules", ".bin"), env.get("PATH", "")])
+    return env
 
 
 def rel(path: str) -> str:
@@ -304,11 +318,18 @@ def check_pytest(nodeid):
 # Anything else: the whole command
 # ------------------------------------------------------------------------------------------------
 
+def run_suite(command):
+    proc = run(["sh", "-c", command], env=npm_script_env())
+    tail = [l for l in (proc.stdout + "\n" + proc.stderr).splitlines() if l.strip()]
+    return proc, tail
+
+
 def scan_suite(command):
-    proc = run(["sh", "-c", command])
+    proc, tail = run_suite(command)
     if proc.returncode == 0:
         return []
-    tail = [l for l in (proc.stdout + "\n" + proc.stderr).splitlines() if l.strip()]
+    if proc.returncode in COULD_NOT_RUN:
+        fail(f"the test command `{command}` couldn't be run (exit {proc.returncode}): {one_line(tail[-1] if tail else '')}")
     return [{
         "kind": "suite",
         "id": command,
@@ -320,7 +341,9 @@ def scan_suite(command):
 
 
 def check_suite(command):
-    proc = run(["sh", "-c", command])
+    proc, tail = run_suite(command)
+    if proc.returncode in COULD_NOT_RUN:
+        fail(f"the test command `{command}` couldn't be run (exit {proc.returncode}): {one_line(tail[-1] if tail else '')}")
     return ("pass", "") if proc.returncode == 0 else ("fail", one_line(proc.stderr or proc.stdout))
 
 
