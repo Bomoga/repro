@@ -12,11 +12,15 @@ const BY_FAMILY: Record<(typeof RUFF_SELECT)[number], { category: string; severi
   B: { category: "correctness", severity: "low" },
 };
 
+// Bandit's S101 ("assert used") is left out: it flags every assert in every pytest test, which would
+// bury the rest in Findings that all reproduce.
+export const RUFF_IGNORE = ["S101"] as const;
+
 // Runs --isolated (the target's own ruff.toml/pyproject can't turn rules off) and --ignore-noqa
 // (its `# noqa` comments can't hide them), the same stance as Semgrep's --disable-nosem.
 export const RUFF_SCAN_COMMAND = [
   "ruff check",
-  `--select ${RUFF_SELECT.join(",")}`,
+  `--select ${RUFF_SELECT.join(",")} --ignore ${RUFF_IGNORE.join(",")}`,
   "--output-format json --isolated --no-cache --ignore-noqa --exit-zero",
   "--extend-exclude .repro",
   ".",
