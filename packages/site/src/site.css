@@ -796,6 +796,7 @@ a.card__cta:hover {
   object-fit: cover;
 }
 
+.credits { display: flex; flex-direction: column; gap: 32px; }
 .res { display: flex; flex-direction: column; gap: 24px; }
 .res > .intro { margin-bottom: 24px; }
 .res__lede { max-width: 60ch; color: var(--ink2); }
