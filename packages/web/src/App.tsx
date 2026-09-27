@@ -135,6 +135,7 @@ export function App() {
               scanFocus={scanFocus}
               onScanFocused={onScanFocused}
               onScanLink={focusScan}
+              onError={onError}
             />
           )}
           {route.tab === "runs" && <RunsList summaries={summaries} />}

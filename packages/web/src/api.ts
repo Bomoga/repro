@@ -1,5 +1,5 @@
 import type { Patch, Run } from "@repro/contracts";
-import type { GoogleSignInStatus, Health, PatchDecision, RunDetail, RunReport, RunSummary, TrustReport } from "@repro/api";
+import type { GoogleSignInStatus, Health, PullRequestMode, PatchDecision, RunDetail, RunReport, RunSummary, TrustReport } from "@repro/api";
 
 // Same pattern as @repro/cli's client: a small typed wrapper over the tRPC HTTP endpoints, not
 // a full @trpc/client, since the dashboard only ever calls these fixed procedures. Requests go
@@ -57,6 +57,8 @@ export const api = {
   decidePatch: (patchId: string, decision: PatchDecision) => mutate<Patch>("patches.decide", { patchId, decision }),
   report: (runId: string) => query<RunReport>("report", { runId }),
   googleAccount: () => query<GoogleSignInStatus>("auth.google"),
+  settings: () => query<{ pullRequestMode: PullRequestMode }>("settings.get"),
+  setPullRequestMode: (mode: PullRequestMode) => mutate<{ pullRequestMode: PullRequestMode }>("settings.setPullRequestMode", { mode }),
 };
 
 /**

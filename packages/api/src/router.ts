@@ -7,6 +7,7 @@ import { MAX_TARGET_REF_LENGTH, targetProblem } from "./targets.ts";
 import { buildTrustReport } from "./trust.ts";
 import { buildReport } from "./report.ts";
 import { googleSignInStatus } from "./google-sign-in.ts";
+import { runtimeSettings } from "./settings.ts";
 import type { RunCounts } from "./store/index.ts";
 
 // Section 8's no-chat-surface rule: the only inputs anywhere in this router are a target ref (to
@@ -147,6 +148,14 @@ export const appRouter = router({
 
   // Which Google account the control plane's Gemini requests run as. Files only: the account and
   // project names, never a credential.
+  // Where verified patches go, switchable from the dashboard: an enum in, never free text.
+  settings: router({
+    get: publicProcedure.query(() => ({ pullRequestMode: runtimeSettings.pullRequestMode() })),
+    setPullRequestMode: publicProcedure
+      .input(z.object({ mode: z.enum(["auto", "github", "local"]) }))
+      .mutation(({ input }) => ({ pullRequestMode: runtimeSettings.setPullRequestMode(input.mode) })),
+  }),
+
   auth: router({
     google: publicProcedure.query(() => googleSignInStatus()),
   }),

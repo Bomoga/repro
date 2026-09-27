@@ -5,6 +5,7 @@ import type { ReviewItem } from "../lib/review.ts";
 import { toHash } from "../lib/route.ts";
 import { RUN_STATUS, flightTime, isInFlight, rel, statusLine, summaryParts, targetTitle } from "../lib/format.ts";
 import { Skeleton, TrustMeter, Window } from "./Bits.tsx";
+import { FixDestination } from "./FixDestination.tsx";
 import { ScanBar } from "./ScanBar.tsx";
 import { StageTimeline } from "./StageTimeline.tsx";
 
@@ -30,6 +31,7 @@ export function Overview({
   scanFocus,
   onScanFocused,
   onScanLink,
+  onError,
 }: {
   summaries: Poll<RunSummary[]>;
   review: Poll<ReviewItem[]>;
@@ -38,6 +40,7 @@ export function Overview({
   scanFocus: number;
   onScanFocused: () => void;
   onScanLink: () => void;
+  onError: (message: string) => void;
 }) {
   const all = summaries.data;
   const fresh = useFreshIds(all?.map((s) => s.run.id));
@@ -70,7 +73,10 @@ export function Overview({
         </div>
       )}
 
-      <ScanBar onQueued={onQueued} onRefused={onRefused} focusSignal={scanFocus} onFocused={onScanFocused} />
+      <div className="scan-stack">
+        <ScanBar onQueued={onQueued} onRefused={onRefused} focusSignal={scanFocus} onFocused={onScanFocused} />
+        <FixDestination onError={onError} />
+      </div>
 
       <Window title="In flight" count={all ? inFlight.length : ""}>
         {!all ? (
