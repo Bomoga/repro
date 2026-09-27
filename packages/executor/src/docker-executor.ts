@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { ExecRequest, type ExecResult, type Executor } from "@repro/contracts";
 
 // The image every sandboxed command runs in (sandbox/Dockerfile). Built locally with
@@ -13,11 +13,12 @@ export const DEFAULT_SANDBOX_IMAGE = process.env.REPRO_SANDBOX_IMAGE ?? "repro-s
 export const CONTAINER_WORKSPACE = "/workspace";
 
 // Repro's own scratch space inside a workspace (self-gitignored; see install.ts), and the Python
-// virtualenv the dependency-install step creates there. Once it exists, every command runs with it
-// first on PATH, so `python -m pytest` and friends see the target's own dependencies.
+// virtualenv the dependency-install step creates there. The venv is never put on PATH: a target can
+// commit anything under .repro/, and whatever is first on PATH decides which `semgrep` or `ruff` a
+// scan runs. What needs the target's dependencies asks for them by name: `repro-python` runs the
+// venv's python, and only once the install step has marked it as its own (sandbox/bin/repro_venv.py).
 export const REPRO_DIR = ".repro";
 export const VENV_DIR = `${REPRO_DIR}/venv`;
-const SANDBOX_PATH = "/opt/repro/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /** Per-container differences from the default sandbox. Nothing but install.ts sets `network`. */
 export interface ContainerOverrides {
@@ -204,10 +205,7 @@ export class DockerExecutor implements Executor {
     const workspacePath = resolveWorkspacePath(request.workspacePath);
     const containerName = `repro-exec-${randomUUID()}`;
     const docker = this.options.dockerBin ?? "docker";
-    const env = existsSync(join(workspacePath, VENV_DIR, "bin"))
-      ? { PATH: `${CONTAINER_WORKSPACE}/${VENV_DIR}/bin:${SANDBOX_PATH}`, VIRTUAL_ENV: `${CONTAINER_WORKSPACE}/${VENV_DIR}` }
-      : undefined;
-    const args = buildDockerArgs({ ...request, workspacePath }, containerName, this.options, { env });
+    const args = buildDockerArgs({ ...request, workspacePath }, containerName, this.options);
     return runContainer(docker, args, containerName, request.timeoutMs, this.options.maxOutputBytes ?? 32 * 1024 * 1024);
   }
 }

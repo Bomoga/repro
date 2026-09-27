@@ -42,8 +42,11 @@ import subprocess
 import sys
 import tempfile
 
+from repro_venv import activated_env, python_in, trusted_venv
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.getcwd()
+VENV = trusted_venv(ROOT)
 CHECKS = {"prompt-logging", "unencrypted-conversation-storage", "third-party-forwarding", "analytics-forwarding"}
 SKIP_DIRS = {".git", "node_modules", ".repro", "__pycache__"}
 MODEL_PROVIDERS = re.compile(
@@ -121,7 +124,8 @@ def run(check, target, function, line):
         print(f"NOT REPRODUCED canary {check} in {target}: file no longer exists")
         sys.exit(0)
     if target.endswith(".py"):
-        harness = ["python3", os.path.join(HERE, "repro-canary-py")]
+        # Under the venv Repro installed the target's dependencies into, when it can trust one.
+        harness = [python_in(VENV), os.path.join(HERE, "repro-canary-py")]
     elif re.search(r"\.(c|m)?js$", target):
         harness = ["node", os.path.join(HERE, "repro-canary-js.cjs")]
     else:
@@ -132,7 +136,8 @@ def run(check, target, function, line):
     report_path = os.path.join(workdir, "report.json")
     before = snapshot()
     try:
-        proc = subprocess.run(harness + [target, function, canary, report_path], capture_output=True, text=True, timeout=60, cwd=ROOT)
+        proc = subprocess.run(harness + [target, function, canary, report_path], capture_output=True, text=True, timeout=60, cwd=ROOT,
+                              env=activated_env(VENV))
     except subprocess.TimeoutExpired:
         fail("the harness timed out")
     after = snapshot()

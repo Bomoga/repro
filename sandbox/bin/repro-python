@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Run Python the way the target's own code needs it: with the dependencies Repro's install step put
+in the workspace's virtualenv, when it built one Repro can trust (repro_venv.py), else with the
+sandbox's python3.
+
+Usage: repro-python [python arguments...]       e.g. repro-python -m pytest -q
+
+The venv is never on PATH, so a bare `python` or `python3` in the sandbox is always the sandbox's own
+and never sees the target's dependencies. Anything that runs the target's Python code (its tests, a
+repair's test run) should go through this instead.
+"""
+import os
+import sys
+
+from repro_venv import activated_env, python_in, trusted_venv
+
+venv = trusted_venv()
+python = python_in(venv)
+os.execve(python, [python, *sys.argv[1:]], activated_env(venv))

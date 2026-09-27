@@ -29,6 +29,9 @@ import {
 // Everything lands in the workspace: node_modules/ where Node looks for it, the Python venv and
 // caches under .repro/, which ignores itself in git. Lane 3's Repair and Challenger work in the same
 // workspace (reset with `git reset --hard`, which leaves untracked files alone), so they see it too.
+// The venv is never on PATH: Python that should see the target's dependencies runs through
+// `repro-python` (e.g. `repro-python -m pytest`), which uses the venv only once VENV_MARKER says this
+// step built it.
 
 export interface InstallStep {
   ecosystem: "npm" | "pip";
@@ -57,6 +60,11 @@ export interface InstallOptions extends DockerExecutorOptions {
 }
 
 const MARKER = `${REPRO_DIR}/deps.json`;
+/**
+ * Written only once the install step has built the venv. It, and nothing under .repro/ being part of
+ * the target's own commit, is what makes `repro-python` trust the venv (sandbox/bin/repro_venv.py).
+ */
+export const VENV_MARKER = `${REPRO_DIR}/venv.json`;
 const NPM_CACHE = `${REPRO_DIR}/npm-cache`;
 const WHEELS = `${REPRO_DIR}/wheels`;
 const REQUIREMENTS = /^requirements(-(dev|test|tests))?\.txt$/;
@@ -67,12 +75,20 @@ interface Plan {
   npm?: { lockfile: boolean };
   pip?: { files: string[] };
   skipped: string[];
+  /** The target commits files under .repro/: nothing gets installed or written there. */
+  reproDirTaken?: true;
 }
 
 /** What to install, from the ingest-time file index and the root package.json. */
 export function planInstall(workspace: Workspace): Plan {
   const index = new Set(workspace.fileIndex);
   const plan: Plan = { skipped: [] };
+
+  // .repro/ is Repro's scratch space. A target that commits files there (a whole fake venv, say)
+  // doesn't get it mixed with Repro's own: nothing is installed, and nothing there is trusted.
+  if (workspace.fileIndex.some((file) => file.startsWith(`${REPRO_DIR}/`))) {
+    return { skipped: [`${REPRO_DIR}/: the target commits files there, where Repro installs dependencies; nothing was installed`], reproDirTaken: true };
+  }
 
   if (index.has("package.json")) {
     let deps = 0;
@@ -177,6 +193,8 @@ async function withRegistryNetwork<T>(
 export async function installDependencies(workspace: Workspace, options: InstallOptions = {}): Promise<InstallReport> {
   const root = resolveWorkspacePath(workspace.path);
   const plan = planInstall(workspace);
+  // Before reading or writing anything under .repro/: it's the target's, not Repro's.
+  if (plan.reproDirTaken) return { cached: false, steps: [], skipped: plan.skipped };
   const print = fingerprint(workspace, plan);
   const marker = join(root, MARKER);
   if (existsSync(marker)) {
@@ -190,6 +208,9 @@ export async function installDependencies(workspace: Workspace, options: Install
 
   mkdirSync(join(root, REPRO_DIR), { recursive: true });
   writeFileSync(join(root, REPRO_DIR, ".gitignore"), "*\n");
+  // Trusted again only if this install builds the venv. Overwritten in place, never deleted and
+  // re-created: Docker Desktop/Colima file sharing can serve a container a re-created file stale.
+  if (existsSync(join(root, VENV_MARKER))) writeFileSync(join(root, VENV_MARKER), "{}\n");
   const report: InstallReport = { cached: false, steps: [], skipped: plan.skipped };
   const timeoutMs = options.timeoutMs ?? 10 * 60_000;
   const maxOutput = options.maxOutputBytes ?? 8 * 1024 * 1024;
@@ -241,7 +262,11 @@ export async function installDependencies(workspace: Workspace, options: Install
   if (plan.pip && downloaded("pip")) {
     const reqs = plan.pip.files.map((file) => `-r '${file}'`).join(" ");
     const command = `python3 -m venv ${VENV_DIR} && ${VENV_DIR}/bin/python -m pip install --no-index --find-links ${WHEELS} --disable-pip-version-check --progress-bar off ${reqs}`;
-    record("pip", "build", command, await offline.exec({ workspacePath: root, command, timeoutMs }));
+    const result = await offline.exec({ workspacePath: root, command, timeoutMs });
+    record("pip", "build", command, result);
+    if (!result.timedOut && result.exitCode === 0) {
+      writeFileSync(join(root, VENV_MARKER), JSON.stringify({ venv: VENV_DIR, requirements: plan.pip.files }, null, 2));
+    }
   }
 
   writeFileSync(marker, JSON.stringify({ fingerprint: print, report }, null, 2));

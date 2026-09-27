@@ -14,6 +14,10 @@ package.json's test script. A command that couldn't be run at all (exit 126 or 1
 installed, or isn't executable) is a setup problem, never a failing test: `scan` stops with exit 2
 so the detector reports it, and `check` answers "could not tell".
 
+Python runs with the virtualenv Repro's install step built, when there's one it can trust
+(repro_venv.py), and every test run gets that venv activated. Never through PATH: `python3` alone
+is always the sandbox's own.
+
 `check` follows the same protocol as the other repro-* helpers:
   exit 1  "REPRODUCED ..." line         the test still fails
   exit 0  "NOT REPRODUCED ..." line     it passes
@@ -27,10 +31,16 @@ import shlex
 import subprocess
 import sys
 
+from repro_venv import activated_env, python_in, trusted_venv
+
 TIMEOUT = 600
 WORKSPACE = os.getcwd()
 # sh's exit codes for "found but not executable" and "not found": the command never ran.
 COULD_NOT_RUN = (126, 127)
+# The target's tests run with its installed dependencies, when Repro installed them.
+VENV = trusted_venv(WORKSPACE)
+PYTHON = python_in(VENV)
+TARGET_ENV = activated_env(VENV)
 
 
 def fail(msg: str) -> None:
@@ -40,7 +50,7 @@ def fail(msg: str) -> None:
 
 def run(argv, cwd=None, env=None):
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd or WORKSPACE, env=env)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd or WORKSPACE, env=env or TARGET_ENV)
     except subprocess.TimeoutExpired:
         fail(f"timed out after {TIMEOUT}s: {' '.join(argv)[:200]}")
 
@@ -48,7 +58,7 @@ def run(argv, cwd=None, env=None):
 def npm_script_env():
     """The environment npm gives a package.json script: the project's installed node_modules/.bin
     first on PATH, so `jest`, `vitest`, `mocha` and friends resolve the way they do under `npm test`."""
-    env = dict(os.environ)
+    env = dict(TARGET_ENV)
     env["PATH"] = os.pathsep.join([os.path.join(WORKSPACE, "node_modules", ".bin"), env.get("PATH", "")])
     return env
 
@@ -113,7 +123,7 @@ def segments():
         for name in files
     )
     if has_py_tests:
-        has_pytest = run(["python3", "-c", "import pytest"]).returncode == 0
+        has_pytest = run([PYTHON, "-c", "import pytest"]).returncode == 0
         out.append(("pytest", [], None) if has_pytest else ("unittest", ["discover"], None))
     return out
 
@@ -199,8 +209,8 @@ def unittest_top(args):
 def unittest_argv(args):
     args = list(args)
     if args and args[0] == "discover":
-        return ["python3", "-m", "unittest", "discover", "-v"] + args[1:]
-    return ["python3", "-m", "unittest", "-v"] + args
+        return [PYTHON, "-m", "unittest", "discover", "-v"] + args[1:]
+    return [PYTHON, "-m", "unittest", "-v"] + args
 
 
 def parse_unittest(text, top):
@@ -257,7 +267,7 @@ def scan_unittest(args):
 
 
 def check_unittest(test_id, top):
-    proc = run(["python3", "-m", "unittest", "-v", test_id], cwd=os.path.join(WORKSPACE, top))
+    proc = run([PYTHON, "-m", "unittest", "-v", test_id], cwd=os.path.join(WORKSPACE, top))
     status, details = parse_unittest(proc.stderr, top)
     for key in (test_id, f"unittest.loader._FailedTest.{test_id}"):
         if key in status:
@@ -286,7 +296,7 @@ def def_line(file, name):
 
 
 def scan_pytest(args):
-    proc = run(["python3", "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider"] + list(args))
+    proc = run([PYTHON, "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider"] + list(args))
     found = []
     for m in re.finditer(r"^(FAILED|ERROR) (\S+?)(?: - (.*))?$", proc.stdout, re.M):
         nodeid = m.group(2)
@@ -305,7 +315,7 @@ def scan_pytest(args):
 
 
 def check_pytest(nodeid):
-    proc = run(["python3", "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider", nodeid])
+    proc = run([PYTHON, "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider", nodeid])
     if proc.returncode == 0:
         return "pass", ""
     if proc.returncode == 1:
