@@ -25,7 +25,8 @@ Secrets are marked. Defaults come from the code as of 2026-09-26; where the code
 
 | Variable | Read by | Notes |
 |---|---|---|
-| `GEMINI_API_KEY` | `@repro/agents` Gemini wrapper (Lane 3); Lane 4's PR narrator goes through the same wrapper | Required for any real model call; unit tests mock the wrapper and don't need it. One key per developer, from Google AI Studio. The demo host uses a key on a billing-linked project. |
+| `GEMINI_API_KEY` | `@repro/agents` Gemini wrapper (Lane 3); Lane 4's PR narrator goes through the same wrapper | Required for any real model call in the default `REPRO_GEMINI_AUTH=api-key`; unit tests mock the wrapper and don't need it. One key per developer, from Google AI Studio. The demo host uses a key on a billing-linked project, or signs in with Google instead, in which case it (and `GOOGLE_API_KEY`) must be unset. |
+| `GOOGLE_APPLICATION_CREDENTIALS`, or gcloud's `application_default_credentials.json` | Google's auth library, inside the Gemini SDK, with `REPRO_GEMINI_AUTH=google` | The Google sign-in: a refresh token and the OAuth client's secret, written by `gcloud auth application-default login` (setup in `packages/orchestrator/README.md`). Never in the repo, a prompt, or a log, and neither is the `client_secret.json` it's made from. Repro checks the file is there at startup and never opens it. |
 | `MONGODB_URI` | `@repro/store` (Lane 1), which the API (Lane 4) and the orchestrator connect through | Connection string for the one shared Atlas cluster Lane 1 provisions and hands out ([MongoDB Atlas](#mongodb-atlas) below). Nobody runs a local database; unit tests use an in-memory `mongod`. The store never logs it and only ever prints it redacted. |
 
 A target-repo GitHub credential for opening repair PRs has no variable name yet. Whatever it becomes: scoped to the minimum, used only at the PR-opening step, never passed to a model.
@@ -45,8 +46,10 @@ A target-repo GitHub credential for opening repair PRs has no variable name yet.
 | `REPRO_MODEL_REPAIR` | `gemini-3.8-flash` | |
 | `REPRO_MODEL_NARRATOR` | `gemini-3.8-flash` | |
 | `REPRO_GEMINI_TRANSPORT` | `request` | `background` polls instead of holding one request open; costs extra requests, so use it only on billing-linked keys |
+| `REPRO_GEMINI_AUTH` | `api-key` | `google` calls Gemini with the operator's Google sign-in (Application Default Credentials from gcloud) instead of `GEMINI_API_KEY`; setup in `packages/orchestrator/README.md`. Anything else fails at startup |
+| `REPRO_GEMINI_QUOTA_PROJECT` | unset | Required with `REPRO_GEMINI_AUTH=google`: the Google Cloud project ID the requests are billed to, sent as `x-goog-user-project` |
 
-Lane 3's integration tests (`npm run test:integration` in `packages/agents`) load `GEMINI_API_KEY` from a `.env` at the repo root, and default both Pro roles to Flash unless the variables are already set.
+Lane 3's integration tests (`npm run test:integration` in `packages/agents`) load `GEMINI_API_KEY`, or `REPRO_GEMINI_AUTH=google` and `REPRO_GEMINI_QUOTA_PROJECT`, from a `.env` at the repo root, skip without either, and default both Pro roles to Flash unless the variables are already set.
 
 ### Sandbox and ingestion (Lane 2)
 

@@ -4,7 +4,7 @@
  * every interaction to the run log. Everything else talks to the `GeminiClient` interface,
  * which is also what unit tests mock.
  */
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GoogleGenAIOptions } from "@google/genai";
 import * as z from "zod";
 
 export type GeminiRole = "diagnose" | "challenger" | "repair" | "narrator";
@@ -130,6 +130,63 @@ export function isDailyQuotaExhausted(error: unknown): error is GeminiError {
   return error instanceof GeminiError && error.status === 429 && PER_DAY_QUOTA.test(error.message);
 }
 
+/** Thrown instead of sending a request the run's Pro-tier request budget doesn't cover. Never retried. */
+export class RequestBudgetExhaustedError extends GeminiError {
+  constructor(
+    readonly limit: number,
+    readonly model: string,
+  ) {
+    super(`the run's budget of ${limit} Pro-tier requests is spent, so the next request to ${model} wasn't sent`, undefined, false);
+    this.name = "RequestBudgetExhaustedError";
+  }
+}
+
+/** The run's Pro-tier request budget is spent: nothing more goes to those models in this run. */
+export function isBudgetExhausted(error: unknown): error is RequestBudgetExhaustedError {
+  return error instanceof RequestBudgetExhaustedError;
+}
+
+/**
+ * Every HTTP request a run sends, per model, and an optional cap on the ones sent to the Pro-tier
+ * models: those behind the diagnose and challenger roles, whose per-day quota is the scarce one.
+ * The wrapper charges it before each request it sends (every attempt, retry, and background poll),
+ * so one budget shared by all of a run's clients stops the run short of the quota instead of
+ * running into it.
+ */
+export class RequestBudget {
+  private readonly byModel = new Map<string, number>();
+  private pro = 0;
+
+  /** No `limit` means no cap: requests are only counted. */
+  constructor(readonly limit?: number) {
+    if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
+      throw new Error(`a request budget must be a positive integer, got ${limit}`);
+    }
+  }
+
+  /** Requests sent to Pro-tier models so far. */
+  get proRequests(): number {
+    return this.pro;
+  }
+
+  /** Pro-tier requests the cap still covers; Infinity without one. */
+  get remaining(): number {
+    return this.limit === undefined ? Infinity : this.limit - this.pro;
+  }
+
+  /** Requests sent so far, per model. */
+  requestsByModel(): Record<string, number> {
+    return Object.fromEntries(this.byModel);
+  }
+
+  /** Records a request about to go to `model`, or throws RequestBudgetExhaustedError for a Pro-tier one past the cap. */
+  charge(model: string, pro: boolean): void {
+    if (pro && this.remaining < 1) throw new RequestBudgetExhaustedError(this.limit!, model);
+    if (pro) this.pro++;
+    this.byModel.set(model, (this.byModel.get(model) ?? 0) + 1);
+  }
+}
+
 export interface RetryPolicy {
   maxAttempts: number;
   baseDelayMs: number;
@@ -137,6 +194,9 @@ export interface RetryPolicy {
 }
 
 const DEFAULT_RETRY: RetryPolicy = { maxAttempts: 4, baseDelayMs: 2_000, maxDelayMs: 60_000 };
+
+/** What the wrapper builds the SDK with: GoogleGenAI's own constructor options. */
+export type GeminiSdkOptions = GoogleGenAIOptions;
 
 /** The slice of the SDK this wrapper uses; tests inject a fake. */
 export interface InteractionsSdk {
@@ -155,15 +215,102 @@ export interface InteractionsSdk {
  */
 export type GeminiTransport = "request" | "background";
 
+/**
+ * How requests authenticate, always to the Gemini Developer API, where the Interactions API lives
+ * (never Vertex AI). Set via REPRO_GEMINI_AUTH. "api-key" (default): GEMINI_API_KEY. "google":
+ * the operator's Google sign-in, the Application Default Credentials that
+ * `gcloud auth application-default login` writes (or the file GOOGLE_APPLICATION_CREDENTIALS
+ * names), which the SDK trades for short-lived OAuth tokens. Every request then names
+ * REPRO_GEMINI_QUOTA_PROJECT in x-goog-user-project, so that project's quota and billing apply,
+ * whatever quota project the credentials file names.
+ */
+export type GeminiAuth = "api-key" | "google";
+
+/** The scopes Google's Gemini OAuth guide signs in with. The SDK insists on cloud-platform among them. */
+export const GOOGLE_SIGN_IN_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/generative-language.retriever",
+] as const;
+
+/** The sign-in every sign-in error points to, as in Google's guide: client_secret.json is the Desktop OAuth client's file. */
+export const GOOGLE_SIGN_IN_COMMAND = `gcloud auth application-default login --client-id-file=client_secret.json --scopes='${GOOGLE_SIGN_IN_SCOPES.join(",")}'`;
+
+// Built without a key, the SDK takes one from these when either is set, whatever else it's given.
+const API_KEY_VARIABLES = ["GEMINI_API_KEY", "GOOGLE_API_KEY"] as const;
+// A Google Cloud project ID, domain-scoped ones included, or a project number.
+const PROJECT = /^(?:[a-z0-9.-]+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$|^\d+$/;
+
+/** The auth REPRO_GEMINI_AUTH names: "api-key" when it's unset or blank, and an error for anything else it doesn't know. */
+export function geminiAuthFromEnv(env: NodeJS.ProcessEnv = process.env): GeminiAuth {
+  const raw = env.REPRO_GEMINI_AUTH?.trim();
+  if (!raw) return "api-key";
+  if (raw === "api-key" || raw === "google") return raw;
+  // Echoed only when it looks like a mistyped mode, not like something pasted into the wrong variable.
+  const got = /^[a-z-]{1,20}$/i.test(raw) ? `, got "${raw}"` : "";
+  throw new GeminiError(`REPRO_GEMINI_AUTH must be "api-key" or "google"${got}`, undefined, false);
+}
+
+/**
+ * Google sign-in's settings, checked the same way by the wrapper before it builds the SDK and by
+ * the control plane at startup: a non-retryable GeminiError for anything that would make the
+ * sign-in fail, or quietly lose to an API key.
+ */
+export function googleSignIn(
+  env: NodeJS.ProcessEnv = process.env,
+  quotaProject = env.REPRO_GEMINI_QUOTA_PROJECT,
+): { quotaProject: string } {
+  refuseSignInConflicts(env);
+  const project = quotaProject?.trim();
+  if (!project) {
+    throw new GeminiError(
+      "REPRO_GEMINI_AUTH=google needs REPRO_GEMINI_QUOTA_PROJECT, the ID of the Google Cloud project its requests are billed to",
+      undefined,
+      false,
+    );
+  }
+  if (!PROJECT.test(project)) {
+    throw new GeminiError("REPRO_GEMINI_QUOTA_PROJECT must be a Google Cloud project ID (like repro-demo-123) or number", undefined, false);
+  }
+  return { quotaProject: project };
+}
+
+/** Throws when the environment would undo Google sign-in: a key the SDK would send instead, or the SDK's debug output, which prints the access token. */
+function refuseSignInConflicts(env: NodeJS.ProcessEnv): void {
+  const keys = API_KEY_VARIABLES.filter((name) => env[name]?.trim());
+  if (keys.length > 0) {
+    throw new GeminiError(
+      `REPRO_GEMINI_AUTH=google, but ${keys.join(" and ")} ${keys.length > 1 ? "are" : "is"} set too, and the Gemini SDK would send that key instead of the Google sign-in: remove it from the environment and .env, or unset REPRO_GEMINI_AUTH to keep using the key`,
+      undefined,
+      false,
+    );
+  }
+  if (env.GOOGLE_GENAI_DEBUG) {
+    throw new GeminiError(
+      "REPRO_GEMINI_AUTH=google, but GOOGLE_GENAI_DEBUG is set, and it makes the Gemini SDK print every request's headers, the access token among them: unset it",
+      undefined,
+      false,
+    );
+  }
+}
+
 export interface GeminiClientOptions {
   apiKey?: string;
+  /** How requests authenticate; REPRO_GEMINI_AUTH when unset. */
+  auth?: GeminiAuth;
+  /** Google sign-in only: the project requests are billed to; REPRO_GEMINI_QUOTA_PROJECT when unset. */
+  quotaProject?: string;
   log?: InteractionLog;
   retry?: Partial<RetryPolicy>;
   /** Deadline for one interaction to finish. High thinking can take minutes. */
   timeoutMs?: number;
   transport?: GeminiTransport;
+  /** Charged for every request this client sends; requests to the Pro-tier roles' models count against its cap. */
+  budget?: RequestBudget;
   env?: NodeJS.ProcessEnv;
+  /** Used as it is: nothing gets built, so no auth setting applies. */
   sdk?: InteractionsSdk;
+  /** Builds the SDK from the options the wrapper picks (default: a real GoogleGenAI); tests inject one to see them. */
+  createSdk?: (options: GeminiSdkOptions) => InteractionsSdk;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
@@ -183,31 +330,34 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     options.transport ?? (env.REPRO_GEMINI_TRANSPORT?.trim() === "background" ? "background" : "request");
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => new Date());
+  // The models behind the Pro-tier roles, after env overrides: whatever role a request comes from,
+  // it spends their quota if it goes to one of them.
+  const proModels = new Set([modelFor("diagnose", env), modelFor("challenger", env)]);
+  const charge = (model: string) => options.budget?.charge(model, proModels.has(model));
   let sdk = options.sdk;
+  let signIn: { quotaProject: string } | undefined;
+  const failureOf = (error: unknown): GeminiError => (signIn ? signInFailure(error, signIn.quotaProject) : classify(error));
 
   const getSdk = (): InteractionsSdk => {
     if (!sdk) {
-      const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
-      if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
-      const client = new GoogleGenAI({ apiKey });
-      sdk = {
-        interactions: {
-          create: (params, requestOptions) =>
-            client.interactions.create(
-              params as unknown as Parameters<typeof client.interactions.create>[0],
-              requestOptions,
-            ),
-          get: (id, params, requestOptions) => client.interactions.get(id, params, requestOptions),
-          cancel: (id) => client.interactions.cancel(id),
-        },
-      };
+      const build = options.createSdk ?? buildSdk;
+      if ((options.auth ?? geminiAuthFromEnv(env)) === "google") {
+        if (options.apiKey !== undefined) throw new GeminiError("the apiKey option can't be combined with Google sign-in", undefined, false);
+        signIn = googleSignIn(env, options.quotaProject);
+        sdk = build(googleSignInSdkOptions(signIn.quotaProject));
+      } else {
+        const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
+        if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
+        sdk = build({ apiKey });
+      }
     }
     return sdk;
   };
 
-  /** Runs one interaction to completion with the configured transport. */
-  const runOnce = async (params: Record<string, unknown>): Promise<unknown> => {
+  /** Runs one interaction to completion with the configured transport, charging the budget for every request. */
+  const runOnce = async (params: Record<string, unknown>, model: string): Promise<unknown> => {
     const api = getSdk().interactions;
+    charge(model);
     if (transport === "request") return api.create(params, { maxRetries: 0, timeout: timeoutMs });
     const deadline = Date.now() + timeoutMs;
     let raw = await api.create({ ...params, background: true }, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
@@ -215,15 +365,21 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     while (PENDING.has(statusOf(raw))) {
       if (Date.now() > deadline) {
         const id = idOf(raw);
-        await api.cancel?.(id).catch(() => undefined);
+        // Best effort, and only when the budget covers it: otherwise the server finishes the interaction on its own.
+        if (api.cancel && (!proModels.has(model) || (options.budget?.remaining ?? Infinity) >= 1)) {
+          charge(model);
+          await api.cancel(id).catch(() => undefined);
+        }
         throw new GeminiError(`interaction ${id} did not finish within ${timeoutMs}ms`, undefined, true);
       }
       await sleep(POLL_INTERVAL_MS);
+      // Outside the try: a spent budget ends the interaction, where a failed poll would be retried.
+      charge(model);
       try {
         raw = await api.get(idOf(raw), undefined, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
         pollFailures = 0;
       } catch (error) {
-        const failure = classify(error);
+        const failure = failureOf(error);
         if (!failure.retryable || ++pollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw failure;
       }
     }
@@ -252,12 +408,12 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
         };
         let failure: GeminiError;
         try {
-          const response = toResponse(await runOnce(params), model);
+          const response = toResponse(await runOnce(params, model), model);
           log.record({ ...entry, durationMs: Date.now() - started, response });
           if (response.status !== "failed") return response;
           failure = new GeminiError(`interaction ${response.interactionId} failed`, undefined, true);
         } catch (error) {
-          failure = error instanceof GeminiError ? error : classify(error);
+          failure = error instanceof GeminiError ? error : failureOf(error);
           log.record({
             ...entry,
             durationMs: Date.now() - started,
@@ -269,6 +425,55 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
       }
     },
   };
+}
+
+/**
+ * The SDK options for Google sign-in: no key, so the SDK signs in with Application Default
+ * Credentials under Google's scopes; the Gemini Developer API even if GOOGLE_GENAI_USE_VERTEXAI
+ * says otherwise; and the quota project on every request, polls and cancels included.
+ */
+function googleSignInSdkOptions(quotaProject: string): GeminiSdkOptions {
+  return {
+    vertexai: false,
+    googleAuthOptions: { scopes: [...GOOGLE_SIGN_IN_SCOPES] },
+    httpOptions: { headers: { "x-goog-user-project": quotaProject } },
+  };
+}
+
+const NO_KEY_WARNING = "API key should be set when using the Gemini API.";
+
+/** A real GoogleGenAI client, narrowed to the interactions this wrapper uses. */
+function buildSdk(sdkOptions: GeminiSdkOptions): InteractionsSdk {
+  let client: GoogleGenAI;
+  if (sdkOptions.apiKey === undefined) {
+    // Signing in. The SDK reads a key from process.env whatever env this client was given, and it
+    // warns that a key should be set, which under sign-in is the point: that one line is dropped.
+    refuseSignInConflicts(process.env);
+    client = withoutWarning(NO_KEY_WARNING, () => new GoogleGenAI(sdkOptions));
+  } else {
+    client = new GoogleGenAI(sdkOptions);
+  }
+  return {
+    interactions: {
+      create: (params, requestOptions) =>
+        client.interactions.create(params as unknown as Parameters<typeof client.interactions.create>[0], requestOptions),
+      get: (id, params, requestOptions) => client.interactions.get(id, params, requestOptions),
+      cancel: (id) => client.interactions.cancel(id),
+    },
+  };
+}
+
+/** Runs `build` with console.warn dropping `warning` and nothing else; `build` is synchronous, so no other code runs meanwhile. */
+function withoutWarning<T>(warning: string, build: () => T): T {
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (args[0] !== warning) warn.apply(console, args);
+  };
+  try {
+    return build();
+  } finally {
+    console.warn = warn;
+  }
 }
 
 function statusOf(raw: unknown): string {
@@ -408,6 +613,114 @@ function apiErrorDetail(e: { body?: unknown; error?: unknown; cause?: unknown; m
     if (typeof detail === "string" && detail && !String(e.message ?? "").includes(detail)) return detail;
   }
   return "";
+}
+
+const NO_CREDENTIALS = /Could not load the default credentials/;
+const QUOTA_PROJECT_REFUSED = /USER_PROJECT_DENIED|USER_PROJECT_INVALID|quota project/i;
+const SCOPES_MISSING = /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i;
+const API_DISABLED = /SERVICE_DISABLED|has not been used in project|it is disabled/i;
+// Google's access and refresh tokens, OAuth client secrets, API keys, and signed JWTs, by their shapes.
+const CREDENTIAL = /\bya29\.[\w.~+/=-]+|\b1\/\/[\w.~+/=-]+|\bGOCSPX-[\w-]+|\bAIza[\w-]{35}|\beyJ[\w-]+\.[\w-]+\.[\w-]+/g;
+
+/**
+ * A failure under Google sign-in. The ones that mean the sign-in itself is broken become
+ * non-retryable errors saying what to run; the rest are classified as in api-key mode. The auth
+ * library's own words never pass through (parsing a malformed credentials file, it can quote the
+ * file), and credential-shaped text is masked in whatever does.
+ */
+function signInFailure(error: unknown, quotaProject: string): GeminiError {
+  const failure = classify(error);
+  const chain = causes(error);
+  const signInAgain = `Sign in again: ${GOOGLE_SIGN_IN_COMMAND}`;
+  const refuse = (message: string, apiSays = false) =>
+    new GeminiError(`Google sign-in: ${message}${apiSays ? ` (${maskCredentials(failure.message)})` : ""}`, failure.status, false);
+
+  const oauth = chain.map(oauthError).find((code) => code !== undefined);
+  if (oauth === "invalid_grant") {
+    return refuse(`it has expired or been revoked (invalid_grant); while the OAuth consent screen is in Testing, Google ends a sign-in 7 days after consent. ${signInAgain}`);
+  }
+  if (oauth) return refuse(`Google refused to refresh the access token (${oauth}). ${signInAgain}`);
+  if (chain.some((e) => NO_CREDENTIALS.test(messageOf(e)))) {
+    return refuse(`there are no Application Default Credentials on this machine. Sign in: ${GOOGLE_SIGN_IN_COMMAND}, or point GOOGLE_APPLICATION_CREDENTIALS at a credentials file`);
+  }
+  if (failure.status === undefined) {
+    // The SDK wraps whatever fails before a request goes out, getting its access token included.
+    const beforeSending = chain.some((e) => nameOf(e) === "UnexpectedClientError");
+    if (beforeSending && (!failure.retryable || chain.some((e) => e instanceof SyntaxError))) {
+      return refuse(
+        `couldn't get an access token from the Application Default Credentials (${labelOf(chain.at(-1))}); the credentials file may be missing, unreadable, or damaged. ${signInAgain}, or fix the file GOOGLE_APPLICATION_CREDENTIALS names`,
+      );
+    }
+  } else if (failure.status === 401 || failure.status === 403) {
+    const says = errorText(error);
+    if (QUOTA_PROJECT_REFUSED.test(says)) {
+      return refuse(
+        `requests can't be billed to REPRO_GEMINI_QUOTA_PROJECT (${quotaProject}): check the project ID, and that the signed-in account may use it (serviceusage.services.use, in the Service Usage Consumer role)`,
+        true,
+      );
+    }
+    if (SCOPES_MISSING.test(says)) return refuse(`it lacks the scopes Gemini needs. ${signInAgain}`, true);
+    if (API_DISABLED.test(says)) {
+      return refuse(`the Generative Language API isn't enabled in ${quotaProject}: enable it in the Cloud console's API Library, then retry`, true);
+    }
+    if (failure.status === 401) return refuse(`Gemini rejected the access token. ${signInAgain}`, true);
+    return refuse(`Gemini refused the signed-in account: check that it may use ${quotaProject} and that the Generative Language API is enabled there`, true);
+  }
+  return new GeminiError(maskCredentials(failure.message), failure.status, failure.retryable);
+}
+
+/** An error and the causes it wraps, outermost first: the SDK wraps what the auth library throws twice over. */
+function causes(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  for (let e = error; typeof e === "object" && e !== null && chain.length < 8 && !chain.includes(e); e = (e as { cause?: unknown }).cause) {
+    chain.push(e);
+  }
+  return chain;
+}
+
+/** The OAuth error code (RFC 6749, section 5.2) a token refresh was refused with, like invalid_grant. */
+function oauthError(error: unknown): string | undefined {
+  const response = (error as { response?: { status?: unknown; data?: { error?: unknown } } }).response;
+  const code = response?.data?.error;
+  const refused = typeof response?.status === "number" && response.status >= 400 && response.status < 500;
+  return refused && typeof code === "string" && /^[a-z_]{1,40}$/.test(code) ? code : undefined;
+}
+
+function messageOf(error: unknown): string {
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? message : "";
+}
+
+function nameOf(error: unknown): string {
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" ? name : "";
+}
+
+/** What to call an error without quoting it: its code when that's an identifier like ENOENT, else its name. */
+function labelOf(error: unknown): string {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return code;
+  const name = error === undefined ? "" : nameOf(error);
+  return /^\w{1,40}$/.test(name) ? name : "unknown error";
+}
+
+/** All an API error says of itself: its message and raw body, which is where Google puts reasons like SERVICE_DISABLED. */
+function errorText(error: unknown): string {
+  const e = (error ?? {}) as { message?: unknown; body?: unknown; error?: unknown };
+  return [e.message, e.body, e.error]
+    .map((part) => {
+      if (typeof part === "string") return part;
+      try {
+        return JSON.stringify(part) ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join(" ");
+}
+
+function maskCredentials(text: string): string {
+  return text.replace(CREDENTIAL, "[redacted]");
 }
 
 function backoffMs(attempt: number, message: string, policy: RetryPolicy): number {

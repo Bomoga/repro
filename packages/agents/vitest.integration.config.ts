@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Integration tests call the real Gemini API with GEMINI_API_KEY from the repo-root .env.
+// Integration tests call the real Gemini API with GEMINI_API_KEY, or with the Google sign-in when
+// REPRO_GEMINI_AUTH=google (REPRO_GEMINI_QUOTA_PROJECT pays), read from the repo-root .env too.
+// They skip without either (test/helpers/gemini.ts).
 const envFile = fileURLToPath(new URL("../../.env", import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 

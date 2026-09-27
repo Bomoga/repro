@@ -96,6 +96,10 @@ describe("repair", () => {
     expect(patch.reproductionOutputAfter).toContain("$ semgrep scan");
     expect(patch.reproductionOutputAfter).toContain("0 findings");
 
+    // The file the findings point to comes up front, as read_file would return it.
+    expect(requests[0]!.input).toContain("# The files the findings point to");
+    expect(requests[0]!.input).toContain("  const sql = 'SELECT id, owner_id, title, body FROM notes WHERE id = ' + noteId;");
+
     // Each turn re-sends tools and system instruction and chains onto the previous interaction.
     expect(requests).toHaveLength(4);
     for (const [i, request] of requests.entries()) {
@@ -206,6 +210,7 @@ describe("repair", () => {
     const run = await repair({ diagnosis: KEY_DIAGNOSIS, findings: FIXTURE_FINDINGS, workspace: fixture.workspace }, deps(gemini));
 
     expect(JSON.stringify(requests)).not.toContain(PLANTED_SECRET);
+    expect(requests[0]!.input).toContain("  OPENAI_API_KEY: '[REDACTED-SECRET-1]',"); // the preloaded file
     expect(JSON.stringify(requests[1]!.input)).toContain("[REDACTED-SECRET-1]");
     expect(onDisk("src/config.js")).not.toContain(PLANTED_SECRET);
     expect(run.patch.diff).toContain("+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,");

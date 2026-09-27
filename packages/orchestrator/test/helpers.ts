@@ -1,5 +1,13 @@
 import { vi } from "vitest";
-import type { GeminiClient, InteractionLog, RepairAndVerifyDeps, RepairAndVerifyResult } from "@repro/agents";
+import {
+  createGeminiClient,
+  type GeminiClient,
+  type InteractionLog,
+  type InteractionsSdk,
+  type RepairAndVerifyDeps,
+  type RepairAndVerifyResult,
+  type RequestBudget,
+} from "@repro/agents";
 import { InMemoryRunStore } from "@repro/api";
 import type { Diagnosis, Finding, Patch, Run, Workspace } from "@repro/contracts";
 import type { PipelineDeps, Stages } from "../src/pipeline.ts";
@@ -69,6 +77,29 @@ export function fakeGemini(outputText = "{}"): (log: InteractionLog) => GeminiCl
       return response;
     },
   });
+}
+
+/** Lane 3's real wrapper over an SDK that answers every request at once, so the Run's budget counts
+ *  and caps requests exactly as it would against the API. Every role is on section 10's default model. */
+export function sdkBackedGemini(): (log: InteractionLog, budget: RequestBudget) => GeminiClient {
+  const sdk: InteractionsSdk = {
+    interactions: {
+      create: async (params) => ({ id: "i1", model: params.model, status: "completed", output_text: "{}", steps: [] }),
+      get: async () => Promise.reject(new Error("no background interactions here")),
+    },
+  };
+  return (log, budget) => createGeminiClient({ log, budget, sdk, env: {}, sleep: async () => {} });
+}
+
+/** A repair that spends `challengerRequests` Pro-tier requests (or keeps going until the budget stops
+ *  it), then ends like the demo's: disputed once, then verified. */
+export function spendingRepair(challengerRequests: number | "until-spent") {
+  return async (input: { diagnosis: Diagnosis }, deps: RepairAndVerifyDeps): Promise<RepairAndVerifyResult> => {
+    for (let i = 0; challengerRequests === "until-spent" || i < challengerRequests; i++) {
+      await deps.gemini.interact({ role: "challenger", systemInstruction: "challenge", input: `attack ${i}` });
+    }
+    return disputedThenVerified(input, deps);
+  };
 }
 
 /**
