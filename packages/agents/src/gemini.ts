@@ -130,6 +130,63 @@ export function isDailyQuotaExhausted(error: unknown): error is GeminiError {
   return error instanceof GeminiError && error.status === 429 && PER_DAY_QUOTA.test(error.message);
 }
 
+/** Thrown instead of sending a request the run's Pro-tier request budget doesn't cover. Never retried. */
+export class RequestBudgetExhaustedError extends GeminiError {
+  constructor(
+    readonly limit: number,
+    readonly model: string,
+  ) {
+    super(`the run's budget of ${limit} Pro-tier requests is spent, so the next request to ${model} wasn't sent`, undefined, false);
+    this.name = "RequestBudgetExhaustedError";
+  }
+}
+
+/** The run's Pro-tier request budget is spent: nothing more goes to those models in this run. */
+export function isBudgetExhausted(error: unknown): error is RequestBudgetExhaustedError {
+  return error instanceof RequestBudgetExhaustedError;
+}
+
+/**
+ * Every HTTP request a run sends, per model, and an optional cap on the ones sent to the Pro-tier
+ * models: those behind the diagnose and challenger roles, whose per-day quota is the scarce one.
+ * The wrapper charges it before each request it sends (every attempt, retry, and background poll),
+ * so one budget shared by all of a run's clients stops the run short of the quota instead of
+ * running into it.
+ */
+export class RequestBudget {
+  private readonly byModel = new Map<string, number>();
+  private pro = 0;
+
+  /** No `limit` means no cap: requests are only counted. */
+  constructor(readonly limit?: number) {
+    if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) {
+      throw new Error(`a request budget must be a positive integer, got ${limit}`);
+    }
+  }
+
+  /** Requests sent to Pro-tier models so far. */
+  get proRequests(): number {
+    return this.pro;
+  }
+
+  /** Pro-tier requests the cap still covers; Infinity without one. */
+  get remaining(): number {
+    return this.limit === undefined ? Infinity : this.limit - this.pro;
+  }
+
+  /** Requests sent so far, per model. */
+  requestsByModel(): Record<string, number> {
+    return Object.fromEntries(this.byModel);
+  }
+
+  /** Records a request about to go to `model`, or throws RequestBudgetExhaustedError for a Pro-tier one past the cap. */
+  charge(model: string, pro: boolean): void {
+    if (pro && this.remaining < 1) throw new RequestBudgetExhaustedError(this.limit!, model);
+    if (pro) this.pro++;
+    this.byModel.set(model, (this.byModel.get(model) ?? 0) + 1);
+  }
+}
+
 export interface RetryPolicy {
   maxAttempts: number;
   baseDelayMs: number;
@@ -162,6 +219,8 @@ export interface GeminiClientOptions {
   /** Deadline for one interaction to finish. High thinking can take minutes. */
   timeoutMs?: number;
   transport?: GeminiTransport;
+  /** Charged for every request this client sends; requests to the Pro-tier roles' models count against its cap. */
+  budget?: RequestBudget;
   env?: NodeJS.ProcessEnv;
   sdk?: InteractionsSdk;
   sleep?: (ms: number) => Promise<void>;
@@ -183,6 +242,10 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     options.transport ?? (env.REPRO_GEMINI_TRANSPORT?.trim() === "background" ? "background" : "request");
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => new Date());
+  // The models behind the Pro-tier roles, after env overrides: whatever role a request comes from,
+  // it spends their quota if it goes to one of them.
+  const proModels = new Set([modelFor("diagnose", env), modelFor("challenger", env)]);
+  const charge = (model: string) => options.budget?.charge(model, proModels.has(model));
   let sdk = options.sdk;
 
   const getSdk = (): InteractionsSdk => {
@@ -205,9 +268,10 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     return sdk;
   };
 
-  /** Runs one interaction to completion with the configured transport. */
-  const runOnce = async (params: Record<string, unknown>): Promise<unknown> => {
+  /** Runs one interaction to completion with the configured transport, charging the budget for every request. */
+  const runOnce = async (params: Record<string, unknown>, model: string): Promise<unknown> => {
     const api = getSdk().interactions;
+    charge(model);
     if (transport === "request") return api.create(params, { maxRetries: 0, timeout: timeoutMs });
     const deadline = Date.now() + timeoutMs;
     let raw = await api.create({ ...params, background: true }, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
@@ -215,10 +279,16 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     while (PENDING.has(statusOf(raw))) {
       if (Date.now() > deadline) {
         const id = idOf(raw);
-        await api.cancel?.(id).catch(() => undefined);
+        // Best effort, and only when the budget covers it: otherwise the server finishes the interaction on its own.
+        if (api.cancel && (!proModels.has(model) || (options.budget?.remaining ?? Infinity) >= 1)) {
+          charge(model);
+          await api.cancel(id).catch(() => undefined);
+        }
         throw new GeminiError(`interaction ${id} did not finish within ${timeoutMs}ms`, undefined, true);
       }
       await sleep(POLL_INTERVAL_MS);
+      // Outside the try: a spent budget ends the interaction, where a failed poll would be retried.
+      charge(model);
       try {
         raw = await api.get(idOf(raw), undefined, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
         pollFailures = 0;
@@ -252,7 +322,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
         };
         let failure: GeminiError;
         try {
-          const response = toResponse(await runOnce(params), model);
+          const response = toResponse(await runOnce(params, model), model);
           log.record({ ...entry, durationMs: Date.now() - started, response });
           if (response.status !== "failed") return response;
           failure = new GeminiError(`interaction ${response.interactionId} failed`, undefined, true);
