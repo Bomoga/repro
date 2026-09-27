@@ -150,8 +150,11 @@ def _hook_httpx():
     httpx.AsyncHTTPTransport.handle_async_request = handle_async_request
 
 
-_hook_urllib3()
-_hook_httpx()
+for _hook in (_hook_urllib3, _hook_httpx):
+    try:
+        _hook()
+    except Exception:
+        pass  # a client version without the hooked class: its requests still show up as uncaptured
 
 
 # Anything else that reaches for the network (a raw socket, aiohttp, a vendored client) is seen when it
