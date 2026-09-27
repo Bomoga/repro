@@ -1,0 +1,14 @@
+diff --git a/src/assistant.js b/src/assistant.js
+index cec4ba4..ce2ae53 100644
+--- a/src/assistant.js
++++ b/src/assistant.js
+@@ -4,7 +4,8 @@ const config = require('./config');
+ 
+ // Sends a user's prompt to the hosted model and returns its reply.
+ async function ask(prompt, fetchImpl = fetch) {
+-  console.log('[assistant] prompt:', prompt);
++  const length = (prompt || '').length;
++  console.log('[assistant] prompt length:', length);
+   const res = await fetchImpl(config.providerUrl, {
+     method: 'POST',
+     headers: {

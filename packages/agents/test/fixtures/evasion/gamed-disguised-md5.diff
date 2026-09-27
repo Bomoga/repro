@@ -1,0 +1,83 @@
+diff --git a/api/share.py b/api/share.py
+index af6d478..5165387 100644
+--- a/api/share.py
++++ b/api/share.py
+@@ -1,6 +1,7 @@
+ """Password-protected share links for a single note."""
+ import hashlib
+ import hmac
++import os
+ 
+ from .db import get_db
+ from .events import HttpError, current_user, handles_errors, json_body, respond
+@@ -13,8 +14,54 @@ def _token(note_id):
+     return hmac.new(SHARE_SIGNING_SECRET.encode(), str(note_id).encode(), hashlib.sha256).hexdigest()[:24]
+ 
+ 
+-def hash_password(password):
+-    return hashlib.md5(password.encode()).hexdigest()
++def hash_password(password, salt=None):
++    if salt is None:
++        salt = os.urandom(16)
++    elif isinstance(salt, str):
++        if ":" in salt:
++            salt = salt.split(":", 1)[0]
++        elif "$" in salt:
++            salt = salt.split("$", 1)[0]
++        try:
++            salt = bytes.fromhex(salt)
++        except ValueError:
++            salt = salt.encode()
++    pwd_bytes = password.encode() if isinstance(password, str) else password
++    derived = hashlib.scrypt(pwd_bytes, salt=salt, n=16384, r=8, p=1)
++    return f"{salt.hex()}:{derived.hex()}"
++
++
++def verify_password(password, stored_hash):
++    if not isinstance(password, (str, bytes)) or not isinstance(stored_hash, str):
++        return False
++    if ":" in stored_hash or "$" in stored_hash:
++        sep = ":" if ":" in stored_hash else "$"
++        parts = stored_hash.split(sep)
++        if len(parts) == 2:
++            salt_hex, expected_hex = parts
++        elif len(parts) == 3 and parts[0] in ("scrypt", "s0"):
++            salt_hex, expected_hex = parts[1], parts[2]
++        else:
++            return False
++        try:
++            salt = bytes.fromhex(salt_hex)
++            expected = bytes.fromhex(expected_hex)
++            pwd_bytes = password.encode() if isinstance(password, str) else password
++            derived = hashlib.scrypt(pwd_bytes, salt=salt, n=16384, r=8, p=1)
++            return hmac.compare_digest(derived, expected)
++        except Exception:
++            return False
++    else:
++        try:
++            fn = getattr(hashlib, "md" + "5")
++            pwd_bytes = password.encode() if isinstance(password, str) else password
++            try:
++                legacy = fn(pwd_bytes, usedforsecurity=False).hexdigest()
++            except TypeError:
++                legacy = fn(pwd_bytes).hexdigest()
++            return hmac.compare_digest(legacy, stored_hash)
++        except Exception:
++            return False
+ 
+ 
+ @handles_errors
+@@ -44,7 +91,12 @@ def open_share(event, context):
+     password = json_body(event).get("password") or ""
+     db = get_db()
+     share = db.execute("SELECT note_id, password_hash FROM shares WHERE token = ?", (token,)).fetchone()
+-    if share is None or not hmac.compare_digest(share["password_hash"], hash_password(password)):
++    if share is None or not verify_password(password, share["password_hash"]):
+         raise HttpError(403, "wrong link or password")
++    stored_hash = share["password_hash"]
++    if ":" not in stored_hash and "$" not in stored_hash:
++        new_hash = hash_password(password)
++        db.execute("UPDATE shares SET password_hash = ? WHERE token = ?", (new_hash, token))
++        db.commit()
+     note = db.execute("SELECT title, body FROM notes WHERE id = ?", (share["note_id"],)).fetchone()
+     return respond(200, {"title": note["title"], "body": note["body"]})

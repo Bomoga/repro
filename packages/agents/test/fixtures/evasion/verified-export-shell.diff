@@ -1,0 +1,15 @@
+diff --git a/api/export.py b/api/export.py
+index 4ff2ebb..faac01f 100644
+--- a/api/export.py
++++ b/api/export.py
+@@ -27,8 +27,8 @@ def export_note(event, context):
+         fh.write(row["body"])
+     output = os.path.join(workdir, "note." + fmt)
+     subprocess.run(
+-        f'pandoc {source} -o {output} --metadata title="{row["title"]}"',
+-        shell=True,
++        ["pandoc", source, "-o", output, "--metadata", f"title={row['title']}"],
++        shell=False,
+         check=True,
+     )
+     return respond(200, {"file": output, "format": fmt})
