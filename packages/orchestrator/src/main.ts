@@ -4,6 +4,7 @@ import { Octokit } from "@octokit/rest";
 import { createGeminiClient } from "@repro/agents";
 import { buildApp, openRunStore } from "@repro/api";
 import { DEFAULT_SANDBOX_IMAGE, DockerExecutor, sandboxAvailable } from "@repro/executor";
+import { positiveIntegerFromEnv } from "./config.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { GitHubPullRequests } from "./pull-request.ts";
 import { PullRequestSync } from "./pull-request-sync.ts";
@@ -19,12 +20,18 @@ import { PullRequestSync } from "./pull-request-sync.ts";
 //                           and poll those PRs so a merge or close on GitHub settles the Patch
 //   REPRO_GITHUB_WEBHOOK_SECRET  also take GitHub's pull_request webhook at POST /github/webhook
 //   REPRO_KEEP_WORKSPACES=1 keep each Run's workspace after it finishes
+//   REPRO_PRO_REQUEST_BUDGET  the most requests one Run sends to the Pro-tier models (the ones behind
+//                           Diagnose and the Challenger, after REPRO_MODEL_* overrides), a positive
+//                           integer; unset means no cap. A Run stops scheduling repairs when what's
+//                           left can't cover another diagnosis's worst case, opens PRs for what it
+//                           verified, and completes. Set it under the project's daily quota.
 
 const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 async function main(): Promise<void> {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set; Diagnose, Repair, and the Challenger need it.");
+  const proRequestBudget = positiveIntegerFromEnv("REPRO_PRO_REQUEST_BUDGET");
   if (!(await sandboxAvailable())) {
     throw new Error(`the sandbox image ${DEFAULT_SANDBOX_IMAGE} isn't available: start Docker and run \`npm run sandbox:build\`. Target code never runs outside it.`);
   }
@@ -43,6 +50,7 @@ async function main(): Promise<void> {
     store,
     executor,
     gemini: (log, budget) => createGeminiClient({ log, budget }),
+    proRequestBudget,
     pullRequests: octokit ? new GitHubPullRequests(octokit, executor) : undefined,
     keepWorkspace: process.env.REPRO_KEEP_WORKSPACES === "1",
     say,
@@ -62,6 +70,7 @@ async function main(): Promise<void> {
     console.log(`left running by an earlier process, and won't resume: ${stale.map((run) => run.id).join(", ")}`);
   }
   console.log(`orchestrator polling the ${store.kind} run store; pull requests ${token ? "on" : "off (set REPRO_GITHUB_TOKEN to open them)"}`);
+  console.log(proRequestBudget ? `each run may send ${proRequestBudget} requests to the Pro-tier models` : "no cap on a run's Pro-tier requests (set REPRO_PRO_REQUEST_BUDGET for one)");
   if (app && process.env.REPRO_GITHUB_WEBHOOK_SECRET) console.log("github webhook at POST /github/webhook");
 
   const shutdown = async (signal: string) => {
