@@ -25,6 +25,10 @@ import { PullRequestSync } from "./pull-request-sync.ts";
 //                           integer; unset means no cap. A Run stops scheduling repairs when what's
 //                           left can't cover another diagnosis's worst case, opens PRs for what it
 //                           verified, and completes. Set it under the project's daily quota.
+//   REPRO_REPAIR_CONCURRENCY  how many diagnoses one Run repairs at once, a positive integer (default
+//                           1: one after another, in the Run's workspace). Above 1, each diagnosis in
+//                           flight gets its own copy of the workspace, and the sandbox runs that many
+//                           diagnoses' tests and counter-tests side by side.
 
 const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
@@ -32,6 +36,7 @@ if (existsSync(envFile)) process.loadEnvFile(envFile);
 async function main(): Promise<void> {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set; Diagnose, Repair, and the Challenger need it.");
   const proRequestBudget = positiveIntegerFromEnv("REPRO_PRO_REQUEST_BUDGET");
+  const repairConcurrency = positiveIntegerFromEnv("REPRO_REPAIR_CONCURRENCY") ?? 1;
   if (!(await sandboxAvailable())) {
     throw new Error(`the sandbox image ${DEFAULT_SANDBOX_IMAGE} isn't available: start Docker and run \`npm run sandbox:build\`. Target code never runs outside it.`);
   }
@@ -51,6 +56,7 @@ async function main(): Promise<void> {
     executor,
     gemini: (log, budget) => createGeminiClient({ log, budget }),
     proRequestBudget,
+    repairConcurrency,
     pullRequests: octokit ? new GitHubPullRequests(octokit, executor) : undefined,
     keepWorkspace: process.env.REPRO_KEEP_WORKSPACES === "1",
     say,
@@ -71,6 +77,7 @@ async function main(): Promise<void> {
   }
   console.log(`orchestrator polling the ${store.kind} run store; pull requests ${token ? "on" : "off (set REPRO_GITHUB_TOKEN to open them)"}`);
   console.log(proRequestBudget ? `each run may send ${proRequestBudget} requests to the Pro-tier models` : "no cap on a run's Pro-tier requests (set REPRO_PRO_REQUEST_BUDGET for one)");
+  console.log(repairConcurrency > 1 ? `each run repairs up to ${repairConcurrency} diagnoses at once` : "each run repairs one diagnosis at a time (REPRO_REPAIR_CONCURRENCY raises it)");
   if (app && process.env.REPRO_GITHUB_WEBHOOK_SECRET) console.log("github webhook at POST /github/webhook");
 
   const shutdown = async (signal: string) => {
