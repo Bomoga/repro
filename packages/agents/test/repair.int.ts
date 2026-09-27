@@ -5,6 +5,7 @@ import { repair, type RepairResult } from "../src/repair/repair.js";
 import { KEY_DIAGNOSIS, SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
 import { FixtureExecutor, demoTargetHandlers, fakeSemgrepAdapter } from "./helpers/executor.js";
+import { realGeminiConfigured } from "./helpers/gemini.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
 function report(label: string, run: RepairResult, log: MemoryInteractionLog) {
@@ -17,7 +18,7 @@ function report(label: string, run: RepairResult, log: MemoryInteractionLog) {
   console.log(`  gemini: ${log.entries.length} calls, ${Math.round(ms / 1000)}s, errors: ${log.entries.filter((e) => e.error).map((e) => e.error!.message).join("; ") || "none"}`);
 }
 
-describe.skipIf(!process.env.GEMINI_API_KEY)("repair against the real Gemini API (mocked Executor)", () => {
+describe.skipIf(!realGeminiConfigured())("repair against the real Gemini API (mocked Executor)", () => {
   let fixture: FixtureWorkspace;
   let executor: FixtureExecutor;
   let log: MemoryInteractionLog;

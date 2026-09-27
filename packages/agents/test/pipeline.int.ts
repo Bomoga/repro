@@ -5,12 +5,13 @@ import { MemoryInteractionLog, createGeminiClient } from "../src/gemini.js";
 import { repairAndVerify } from "../src/pipeline.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET, PROMPT_LOGGED, SQLI_OWNER } from "./fixtures/findings.js";
 import { FixtureExecutor, demoTargetHandlers, fakeSemgrepAdapter, simulatedInjectionCounterTest } from "./helpers/executor.js";
+import { realGeminiConfigured } from "./helpers/gemini.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
 // Lane 3 end to end on the real Gemini API: Diagnose -> Repair -> Challenger -> gate. Commands
 // are answered by the fixture Executor's oracles (the sandbox isn't wired in yet).
 
-describe.skipIf(!process.env.GEMINI_API_KEY)("lane 3 end to end on the real Gemini API (simulated sandbox)", () => {
+describe.skipIf(!realGeminiConfigured())("lane 3 end to end on the real Gemini API (simulated sandbox)", () => {
   let fixture: FixtureWorkspace;
   beforeEach(() => {
     fixture = materializeWorkspace("run-int-pipeline");
