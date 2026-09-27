@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""HTTPS CONNECT proxy that only reaches package registries.
+
+The dependency-install phase is the one sandboxed step allowed any network at all. Its container
+sits on an internal Docker network with no route out; this proxy, attached to that network and to
+the outside, is its only way to the internet, and it only tunnels to the hosts in
+REPRO_REGISTRY_ALLOW (default: the npm and PyPI registries), on port 443. Everything else gets a
+403 and a line on stderr, so a blocked attempt is visible in the install log.
+
+Usage: repro-registry-proxy [port]      (default 3128)
+"""
+import asyncio
+import os
+import sys
+
+DEFAULT_ALLOW = "registry.npmjs.org,pypi.org,files.pythonhosted.org"
+ALLOW = {h.strip().lower() for h in os.environ.get("REPRO_REGISTRY_ALLOW", DEFAULT_ALLOW).split(",") if h.strip()}
+
+
+def log(msg: str) -> None:
+    print(f"repro-registry-proxy: {msg}", file=sys.stderr, flush=True)
+
+
+async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        while data := await reader.read(65536):
+            writer.write(data)
+            await writer.drain()
+    except (ConnectionError, asyncio.IncompleteReadError):
+        pass
+    finally:
+        writer.close()
+
+
+async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        request = (await reader.readline()).decode("latin-1").strip()
+        while (await reader.readline()) not in (b"\r\n", b"\n", b""):
+            pass
+        method, target, *_ = request.split(" ") + ["", ""]
+        host, _, port = target.rpartition(":")
+        host = host.strip("[]").lower()
+        if method.upper() != "CONNECT" or host not in ALLOW or port != "443":
+            log(f"denied {method} {target}")
+            writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            writer.close()
+            return
+        upstream_reader, upstream_writer = await asyncio.wait_for(asyncio.open_connection(host, 443), timeout=30)
+        writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        await writer.drain()
+        await asyncio.gather(pipe(reader, upstream_writer), pipe(upstream_reader, writer))
+    except Exception as err:  # one bad client must never take the proxy down
+        log(f"error: {err}")
+        writer.close()
+
+
+async def main() -> None:
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 3128
+    server = await asyncio.start_server(handle, "0.0.0.0", port)
+    log(f"listening on :{port}, allowing {', '.join(sorted(ALLOW))}")
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
