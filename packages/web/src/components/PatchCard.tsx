@@ -171,10 +171,16 @@ export function PatchCard({
         <button type="button" className="btn btn--sm" aria-expanded={diffOpen} aria-controls={diffId} onClick={() => setDiffOpen(!diffOpen)}>
           {diffOpen ? "Hide diff" : "Show diff"}
         </button>
-        {patch.prUrl && (
-          <a className="card__pr" href={patch.prUrl} target="_blank" rel="noopener noreferrer">
-            Pull request ↗
-          </a>
+        {patch.prUrl?.startsWith("file://") ? (
+          <code className="card__pr" title={patch.prUrl.slice("file://".length).replace("#", " · branch ")}>
+            Local branch {patch.prUrl.split("#")[1]}
+          </code>
+        ) : (
+          patch.prUrl && (
+            <a className="card__pr" href={patch.prUrl} target="_blank" rel="noopener noreferrer">
+              Pull request ↗
+            </a>
+          )
         )}
         {verified && (
           <span className="card__decide">

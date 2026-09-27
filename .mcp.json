@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "repro": {
+      "command": "node",
+      "args": ["--import", "tsx", "packages/mcp/src/server.ts"],
+      "env": { "REPRO_API_URL": "http://localhost:4000" }
+    }
+  }
+}
