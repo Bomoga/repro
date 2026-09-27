@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Octokit } from "@octokit/rest";
 import { createGeminiClient } from "@repro/agents";
-import { buildApp, openRunStore } from "@repro/api";
+import { buildApp, openRunStore, runtimeSettings } from "@repro/api";
 import { DEFAULT_SANDBOX_IMAGE, DockerExecutor, sandboxAvailable } from "@repro/executor";
 import { geminiAtStartup, geminiStartupLine, positiveIntegerFromEnv } from "./config.ts";
 import { Orchestrator } from "./orchestrator.ts";
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   const executor = new DockerExecutor();
   const token = process.env.REPRO_GITHUB_TOKEN;
   const octokit = token ? new Octokit({ auth: token }) : undefined;
-  const prMode = pullRequestModeFromEnv();
+  const prMode = runtimeSettings.setPullRequestMode(pullRequestModeFromEnv());
   if (prMode === "github" && !octokit) throw new Error("REPRO_PR_MODE=github needs REPRO_GITHUB_TOKEN");
   const say = (line: string) => console.log(line);
   const orchestrator = new Orchestrator({
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     gemini: gemini.auth === "none" ? undefined : (log, budget) => createGeminiClient({ log, budget }),
     proRequestBudget,
     repairConcurrency,
-    pullRequests: new RoutedPullRequests(prMode, new LocalBranches(), octokit ? new GitHubPullRequests(octokit, executor) : undefined, octokit),
+    pullRequests: new RoutedPullRequests(() => runtimeSettings.pullRequestMode(), new LocalBranches(), octokit ? new GitHubPullRequests(octokit, executor) : undefined, octokit),
     keepWorkspace: process.env.REPRO_KEEP_WORKSPACES === "1",
     say,
   });

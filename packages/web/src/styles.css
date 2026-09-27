@@ -537,6 +537,26 @@ input::placeholder {
   }
 }
 
+.scan-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dest__label {
+  margin-right: 6px;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  color: var(--ink2);
+}
+
 /* -------------------------------------------------------------------------------- Windows */
 
 .win {

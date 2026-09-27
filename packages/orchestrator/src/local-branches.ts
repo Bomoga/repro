@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Octokit } from "@octokit/rest";
+import type { PullRequestMode } from "@repro/api";
 import { parseGithubRef } from "@repro/ingest";
 import { pullRequestTitle, type PullRequestInput, type PullRequestOpener } from "./pull-request.ts";
 
@@ -49,13 +50,7 @@ export class LocalBranches implements PullRequestOpener {
   }
 }
 
-export type PullRequestMode = "auto" | "github" | "local";
-
-export function pullRequestModeFromEnv(env: NodeJS.ProcessEnv = process.env): PullRequestMode {
-  const raw = env.REPRO_PR_MODE?.trim() || "auto";
-  if (raw === "auto" || raw === "github" || raw === "local") return raw;
-  throw new Error(`REPRO_PR_MODE must be auto, github, or local, got "${raw}"`);
-}
+export { pullRequestModeFromEnv, type PullRequestMode } from "@repro/api";
 
 /**
  * Picks where each verified patch goes. github: a GitHub PR (needs REPRO_GITHUB_TOKEN). local: a
@@ -66,7 +61,8 @@ export class RoutedPullRequests implements PullRequestOpener {
   private readonly canPush = new Map<string, Promise<boolean>>();
 
   constructor(
-    private readonly mode: PullRequestMode,
+    /** Read for every patch, so the dashboard can switch it while the control plane runs. */
+    private readonly mode: PullRequestMode | (() => PullRequestMode),
     private readonly local: PullRequestOpener,
     private readonly github: PullRequestOpener | undefined,
     private readonly octokit: Octokit | undefined,
@@ -78,8 +74,9 @@ export class RoutedPullRequests implements PullRequestOpener {
 
   private async useGithub(input: PullRequestInput): Promise<boolean> {
     const { target } = input.run;
-    if (this.mode === "local" || target.kind !== "github" || !this.github) return false;
-    if (this.mode === "github") return true;
+    const mode = typeof this.mode === "function" ? this.mode() : this.mode;
+    if (mode === "local" || target.kind !== "github" || !this.github) return false;
+    if (mode === "github") return true;
     const { owner, repo } = parseGithubRef(target.ref);
     const key = `${owner}/${repo}`.toLowerCase();
     if (!this.canPush.has(key)) {
