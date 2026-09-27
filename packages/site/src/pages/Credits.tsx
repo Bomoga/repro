@@ -2,7 +2,7 @@ import { OSS, TEAM } from "../content.ts";
 
 export function Credits() {
   return (
-    <>
+    <div className="credits">
       <section className="intro intro--credits">
         <span className="eyebrow">credits · ShellHacks 2026</span>
         <h1 className="intro__title">Built in 36 hours by three people.</h1>
@@ -44,6 +44,6 @@ export function Credits() {
           ))}
         </div>
       </section>
-    </>
+    </div>
   );
 }
