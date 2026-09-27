@@ -3,19 +3,16 @@ import { TOKENS_SAVED_PCT } from "./results.ts";
 
 export const INSTALL_COMMAND = "curl -fsSL repro.miami/install | sh";
 
-export const DASHBOARD_URL = (import.meta.env.VITE_DASHBOARD_URL ?? "http://localhost:5173").replace(/\/$/, "");
 export const GITHUB_URL = import.meta.env.VITE_GITHUB_URL ?? "https://github.com/Bomoga/repro";
 
-/** "Sample report" is a real finished run in the dashboard, opened on its Report tab. */
-export const SAMPLE_REPORT_URL = `${DASHBOARD_URL}/#/overview/run_demo_completed/report`;
 
-export const PAGES = ["home", "download", "docs", "results", "pricing", "faq", "credits"] as const;
+export const PAGES = ["home", "download", "docs", "results", "report", "pricing", "faq", "credits"] as const;
 export type Page = (typeof PAGES)[number];
 
 export const NAV: { label: string; page?: Page; href?: string }[] = [
   { label: "Docs", page: "docs" },
   { label: "Results", page: "results" },
-  { label: "Sample report", href: SAMPLE_REPORT_URL },
+  { label: "Sample report", page: "report" },
   { label: "Pricing", page: "pricing" },
   { label: "FAQ", page: "faq" },
   { label: "Credits", page: "credits" },
@@ -26,6 +23,7 @@ export const PAGE_TITLE: Record<Page, string> = {
   download: "Get Repro",
   docs: "Repro docs · Quickstart",
   results: "Repro results · ShellHacks 2026",
+  report: "Repro sample report · Bomoga/repro-demo",
   pricing: "Repro pricing",
   faq: "Repro FAQ",
   credits: "Repro credits",
@@ -165,9 +163,9 @@ export const FAQ: [string, string][] = [
 ];
 
 export const TEAM = [
-  { n: "01", handle: "@AlexanderGese", photo: "/team/alexander-gese.jpg", name: "Alexander Gese", role: "Orchestrator, run store + dashboard" },
-  { n: "02", handle: "@brandondelgadoo", photo: "/team/brandon-delgado.jpg", name: "Brandon Delgado", role: "Scanners + sandbox reproduction" },
-  { n: "03", handle: "@Bomoga", photo: "/team/adrian-morton.jpg", name: "Adrian Morton", role: "Diagnosis, repair + challenger" },
+  { n: "01", handle: "@AlexanderGese", photo: "/team/alexander-gese.jpg", name: "Alexander Gese" },
+  { n: "02", handle: "@brandondelgadoo", photo: "/team/brandon-delgado.jpg", name: "Brandon Delgado" },
+  { n: "03", handle: "@Bomoga", photo: "/team/adrian-morton.jpg", name: "Adrian Morton" },
 ];
 
 export const OSS = [

@@ -10,7 +10,7 @@ const pct = (part: number, whole: number) => {
 const n = (value: number) => value.toLocaleString("en-US");
 
 export function Results() {
-  const { run, tokens, saved, benchmarks } = RESULTS;
+  const { run, runs, tokens, saved, benchmarks } = RESULTS;
   const avoided = saved.grouping.tokens + saved.gate.tokens;
   const withoutRepro = tokens.total + avoided;
   const challengerWithoutGate = tokens.byRole.challenger + saved.gate.tokens;
@@ -70,8 +70,28 @@ export function Results() {
 
       <section className="panel">
         <div className="card__tab">
+          <span>the runs · combined above</span>
+          <span>{runs.length} targets</span>
+        </div>
+        {runs.map((r) => (
+          <div key={r.target} className="receipt__row res__row">
+            <span>
+              {r.target}
+              {!r.finished && <span className="res__live"> · still running</span>}
+              <span className="res__how">
+                {r.how} {pct(r.reproduced, r.findings)} reproduced · {pct(r.findings - r.diagnoses, r.findings)} fewer repair sessions ·{" "}
+                {pct(r.rejected, r.attempts)} of patches blocked · {pct(r.tokens.cached, r.tokens.input)} cached
+              </span>
+            </span>
+            <span className="receipt__v">{pct(r.total, tokens.total)} of tokens</span>
+          </div>
+        ))}
+      </section>
+
+      <section className="panel">
+        <div className="card__tab">
           <span>where the tokens went · {run.target}</span>
-          <span>100% = one run</span>
+          <span>100% = every run above</span>
         </div>
         <div className="res__bar" aria-label="Tokens by stage">
           {Object.entries(tokens.byRole).map(([role, value]) => (
@@ -81,7 +101,7 @@ export function Results() {
         {rows([
           ["Repair", tokens.byRole.repair, tokens.total, "the agent that writes the patch"],
           ["Challenger", tokens.byRole.challenger, tokens.total, "counter-tests that try to break each patch"],
-          ["Diagnosis", tokens.byRole.diagnose, tokens.total, "one request for every finding in the run"],
+          ["Diagnosis", tokens.byRole.diagnose, tokens.total, "one request covers every finding in a run"],
           ["Thinking tokens", tokens.thought, tokens.total, "model reasoning"],
           ["Requests on the larger model", tokens.pro, tokens.requests],
         ])}
@@ -118,7 +138,10 @@ export function Results() {
           <div key={b.repo} className="receipt__row res__row">
             <span>
               {b.repo}
-              <span className="res__how">{b.reproduced === null ? `${n(b.findings)} findings detected · reproduction hit the 15-minute cap` : `${n(b.findings)} findings · ${b.seconds}s`}</span>
+              <span className="res__how">
+                {b.files !== null && `${n(b.files)} files · `}
+                {b.reproduced === null ? `${n(b.findings)} findings detected · reproduction hit the 15-minute cap` : `${n(b.findings)} findings · ${b.seconds}s`}
+              </span>
             </span>
             <span className="receipt__v">{b.reproduced === null ? "n/a" : pct(b.reproduced, b.findings)}</span>
           </div>

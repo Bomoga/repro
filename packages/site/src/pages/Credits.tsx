@@ -27,7 +27,6 @@ export function Credits() {
             </div>
             <div className="team__who">
               <span className="team__name">{m.name}</span>
-              <span className="team__role">{m.role}</span>
             </div>
           </div>
         ))}
