@@ -53,6 +53,8 @@ export function semgrepScanCommand(pack: string): string {
     // The target repo is untrusted (section 9): its nosemgrep comments and .semgrepignore files
     // don't get to hide findings from the scan that's judging it.
     "--disable-nosem --x-ignore-semgrepignore-files",
+    // Installed dependencies and Repro's own scratch space aren't the project's code.
+    "--exclude node_modules --exclude .repro",
     "--timeout 30 --max-target-bytes 2000000",
     ".",
   ].join(" ");

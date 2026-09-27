@@ -4,3 +4,9 @@ title = "repro"
 
 [extend]
 useDefault = true
+
+# Installed dependencies and Repro's own scratch space (packages/executor/src/install.ts) aren't the
+# project's code: a key inside some package in node_modules/ is that package's business.
+[[allowlists]]
+description = "Installed dependencies and Repro's scratch space"
+paths = ['''(^|/)node_modules/''', '''(^|/)\.repro/''']

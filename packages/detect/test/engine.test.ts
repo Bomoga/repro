@@ -59,4 +59,42 @@ describe("detect", () => {
     expect(r.findings).toEqual([base]);
     expect(r.failures[0]!.message).toContain("invalid Finding");
   });
+
+  it("installs the target's dependencies once, and reports a failed step instead of failing the scan", async () => {
+    let calls = 0;
+    const install = async () => {
+      calls++;
+      return {
+        cached: false,
+        skipped: [],
+        steps: [
+          { ecosystem: "npm" as const, phase: "download" as const, command: "npm ci", ok: true, exitCode: 0, timedOut: false, durationMs: 1, output: "" },
+          { ecosystem: "pip" as const, phase: "download" as const, command: "pip download", ok: false, exitCode: 1, timedOut: false, durationMs: 1, output: "ERROR: No matching distribution found for nothing==1" },
+        ],
+      };
+    };
+    const r = await detect(seededWorkspace, exec, [adapter("fake", [base])], { install });
+    expect(calls).toBe(1);
+    expect(r.findings).toEqual([base]);
+    expect(r.install?.steps).toHaveLength(2);
+    expect(r.failures).toEqual([
+      { detectorId: "dependency-install", message: "pip download failed (exit 1): ERROR: No matching distribution found for nothing==1" },
+    ]);
+  });
+
+  it("reports an install that couldn't run at all, and skips it when told to", async () => {
+    const broken = async () => {
+      throw new Error("could not create the install network");
+    };
+    const r = await detect(seededWorkspace, exec, [adapter("fake", [base])], { install: broken });
+    expect(r.failures).toEqual([{ detectorId: "dependency-install", message: "could not create the install network" }]);
+    const skipped = await detect(seededWorkspace, exec, [adapter("fake", [base])], { install: null });
+    expect(skipped.install).toBeUndefined();
+  });
+
+  it("doesn't try to install without a real sandbox", async () => {
+    const r = await detect(seededWorkspace, exec, [adapter("fake", [base])]);
+    expect(r.install).toBeUndefined();
+    expect(r.failures).toEqual([]);
+  });
 });

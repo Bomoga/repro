@@ -37,7 +37,8 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
   });
 
   it("detects every seeded issue, all unconfirmed", async () => {
-    const result = await detect(workspace, exec);
+    // install: null keeps the default suite offline; install.test.ts covers the network path.
+    const result = await detect(workspace, exec, undefined, { install: null });
     expect(result.failures).toEqual([]);
     findings = result.findings;
     const byDetector = (id: string) => findings.filter((f) => f.detectorId === id).length;
