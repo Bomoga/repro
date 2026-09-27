@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p packages/web/tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p packages/web/tsconfig.json && tsc -p packages/site/tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "dev": "npm run dev --workspace @repro/api",
@@ -17,6 +17,10 @@
     "cli": "node packages/cli/bin/repro.js",
     "seed": "npm run seed -w @repro/api",
     "web": "npm run dev --workspace @repro/web",
+    "dev:web": "npm run dev -w @repro/web",
+    "dev:site": "npm run dev -w @repro/site",
+    "dev:all": "node scripts/dev-all.mjs",
+    "demo": "node scripts/dev-all.mjs --control-plane",
     "sandbox:build": "docker build -t repro-sandbox:dev sandbox",
     "test:rules": "semgrep scan --test --metrics=off --disable-version-check sandbox/rules/privacy-patterns",
     "scan:lane2": "tsx scripts/lane2-scan.ts"

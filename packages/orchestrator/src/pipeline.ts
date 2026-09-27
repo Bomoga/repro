@@ -39,7 +39,7 @@ export interface PipelineDeps {
   executor: Executor;
   /** A Gemini client that records every interaction to the log it's given and charges every request
    *  to the budget it's given: both the Run's own. */
-  gemini: (log: InteractionLog, budget: RequestBudget) => GeminiClient;
+  gemini?: (log: InteractionLog, budget: RequestBudget) => GeminiClient;
   /** The most requests one Run may send to the Pro-tier models (REPRO_PRO_REQUEST_BUDGET); unset, no cap. */
   proRequestBudget?: number;
   /** How many Diagnoses one Run repairs at once (REPRO_REPAIR_CONCURRENCY). 1, the default, repairs
@@ -232,7 +232,14 @@ export async function processRun(claimed: Run, deps: PipelineDeps): Promise<Run>
     log.event("reproduced", { attempts: reproduced.attempts });
     say(`  ${findings.length} flagged, ${findings.filter((f) => f.reproducible).length} reproduced`);
 
-    if (findings.length > 0) {
+    // Without a Gemini client the Run ends here: detection and reproduction are model-free, and
+    // the reproduced Findings are real results on their own.
+    if (findings.length > 0 && !deps.gemini) {
+      log.event("model-stages-skipped", { reason: "no Gemini auth configured" });
+      say("  no Gemini client: stopping after reproduction");
+    }
+
+    if (findings.length > 0 && deps.gemini) {
       await enter("diagnose");
       const gemini = deps.gemini(log.interactions, budget);
       const diagnosed = await stages.diagnose({ findings, workspace }, { gemini });

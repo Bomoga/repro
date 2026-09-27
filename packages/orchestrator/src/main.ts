@@ -14,7 +14,8 @@ import { PullRequestSync } from "./pull-request-sync.ts";
 //   REPRO_GEMINI_AUTH       how Diagnose, Repair, and the Challenger reach Gemini: api-key (default)
 //                           or google, the operator's Google sign-in instead of a key (README.md has
 //                           the setup); anything else fails at startup, which prints the mode
-//   GEMINI_API_KEY          required with api-key. With google it must be unset, GOOGLE_API_KEY too,
+//   GEMINI_API_KEY          required with api-key; with neither it nor REPRO_GEMINI_AUTH set, Runs
+//                           stop after reproduction, which needs no model. With google it must be unset, GOOGLE_API_KEY too,
 //                           or the SDK would send it instead of the sign-in
 //   REPRO_GEMINI_QUOTA_PROJECT  required with google: the Google Cloud project ID its requests are
 //                           billed to, printed at startup. The sign-in itself is the Application
@@ -63,7 +64,7 @@ async function main(): Promise<void> {
   const orchestrator = new Orchestrator({
     store,
     executor,
-    gemini: (log, budget) => createGeminiClient({ log, budget }),
+    gemini: gemini.auth === "none" ? undefined : (log, budget) => createGeminiClient({ log, budget }),
     proRequestBudget,
     repairConcurrency,
     pullRequests: octokit ? new GitHubPullRequests(octokit, executor) : undefined,
