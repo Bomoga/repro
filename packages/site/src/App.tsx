@@ -9,6 +9,7 @@ import { Results } from "./pages/Results.tsx";
 import { Faq } from "./pages/Faq.tsx";
 import { Credits } from "./pages/Credits.tsx";
 import { Report } from "./pages/Report.tsx";
+import { Legal } from "./pages/Legal.tsx";
 
 function NavLinks({ page, go, variant }: { page: Page; go: (p: Page) => void; variant: "bar" | "menu" }) {
   const cls = variant === "bar" ? "nav__link" : "menu__item";
@@ -109,12 +110,14 @@ export function App() {
         {page === "pricing" && <Pricing go={go} />}
         {page === "faq" && <Faq />}
         {page === "credits" && <Credits />}
+        {page === "legal" && <Legal />}
       </main>
 
       <footer className="ftr">
         <span>Repro · v0.1.0</span>
         <a href="#report">Sample report</a>
         <a href={GITHUB_URL}>GitHub</a>
+        <a href="#legal">Legal</a>
         <span className="ftr__made">Made at ShellHacks 2026</span>
       </footer>
     </div>

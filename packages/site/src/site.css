@@ -861,3 +861,5 @@ a.card__cta:hover {
 .rep__sev[data-sev="high"], .rep__sev[data-sev="critical"] { color: var(--amber); }
 .rep__finding .res__how { overflow-wrap: anywhere; }
 .rep__fstatus { font-size: 19px; color: var(--ink2); }
+
+.legal__body { border-top: 0; padding-top: 10px; }
