@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""The target project's own failing tests, as Findings.
+
+Usage:
+  repro-test scan                                   JSON list of failing tests on stdout
+  repro-test check <kind> <file> <line> <id> [top]  reproductionCommand for one of them
+
+The test command comes from package.json's "test" script, split on && / ; / ||, so one failing
+runner doesn't hide the next. With no test script, Python tests run under pytest if the project
+installed it, otherwise unittest. Runners understood test by test: node --test (TAP), python -m
+unittest (-v), pytest (-rfE). Anything else (jest, vitest, mocha, ...) is run as a whole: a failing
+command becomes one Finding on package.json's test script.
+
+`check` follows the same protocol as the other repro-* helpers:
+  exit 1  "REPRODUCED ..." line         the test still fails
+  exit 0  "NOT REPRODUCED ..." line     it passes
+  exit 2  reason on stderr              could not tell (the test is gone, the run timed out, ...)
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+TIMEOUT = 600
+WORKSPACE = os.getcwd()
+
+
+def fail(msg: str) -> None:
+    print(f"repro-test: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def run(argv, cwd=None):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd or WORKSPACE)
+    except subprocess.TimeoutExpired:
+        fail(f"timed out after {TIMEOUT}s: {' '.join(argv)[:200]}")
+
+
+def rel(path: str) -> str:
+    path = os.path.normpath(path)
+    return os.path.relpath(path, WORKSPACE) if os.path.isabs(path) else path
+
+
+def one_line(text: str, limit: int = 240) -> str:
+    return " ".join((text or "").split())[:limit]
+
+
+# ------------------------------------------------------------------------------------------------
+# What to run
+# ------------------------------------------------------------------------------------------------
+
+def package_test_line() -> int:
+    try:
+        with open("package.json") as fh:
+            for i, line in enumerate(fh, 1):
+                if re.search(r'"test"\s*:', line):
+                    return i
+    except OSError:
+        pass
+    return 1
+
+
+def segments():
+    """(kind, argv-or-shell, extra) for each test command the project defines."""
+    out = []
+    script = None
+    try:
+        with open("package.json") as fh:
+            script = (json.load(fh).get("scripts") or {}).get("test")
+    except (OSError, ValueError):
+        pass
+    if script and "no test specified" not in script:
+        for part in re.split(r"\s*(?:&&|\|\||;)\s*", script):
+            part = part.strip()
+            if not part:
+                continue
+            bare = re.sub(r"^(?:\w+=\S*\s+)+", "", part)
+            try:
+                words = shlex.split(bare)
+            except ValueError:
+                out.append(("suite", part, None))
+                continue
+            if len(words) >= 2 and words[0] == "node" and "--test" in words:
+                out.append(("node", words, None))
+            elif len(words) >= 3 and re.fullmatch(r"python3?", words[0]) and words[1:3] == ["-m", "unittest"]:
+                out.append(("unittest", words[3:], None))
+            elif words[0] == "pytest" or (len(words) >= 3 and re.fullmatch(r"python3?", words[0]) and words[1:3] == ["-m", "pytest"]):
+                out.append(("pytest", words[1:] if words[0] == "pytest" else words[3:], None))
+            else:
+                out.append(("suite", part, None))
+        return out
+    has_py_tests = any(
+        re.match(r"(test_.*|.*_test)\.py$", name)
+        for _, dirs, files in os.walk(WORKSPACE)
+        if not {"node_modules", ".git", ".repro"} & set(_.split(os.sep))
+        for name in files
+    )
+    if has_py_tests:
+        has_pytest = run(["python3", "-c", "import pytest"]).returncode == 0
+        out.append(("pytest", [], None) if has_pytest else ("unittest", ["discover"], None))
+    return out
+
+
+# ------------------------------------------------------------------------------------------------
+# node --test (TAP)
+# ------------------------------------------------------------------------------------------------
+
+def with_tap(words):
+    words = [w for w in words if not w.startswith("--test-reporter")]
+    at = words.index("--test") + 1
+    return words[:at] + ["--test-reporter=tap"] + words[at:]
+
+
+def parse_tap(text):
+    """(name, status, file, line, message) for each leaf test in TAP output."""
+    lines = text.splitlines()
+    results = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^\s*(not ok|ok) \d+ - (.*?)(?: # .*)?$", line)
+        if not m:
+            continue
+        block = []
+        j = i + 1
+        if j < len(lines) and lines[j].strip() == "---":
+            j += 1
+            while j < len(lines) and lines[j].strip() != "...":
+                block.append(lines[j])
+                j += 1
+        yaml = "\n".join(block)
+        if re.search(r"failureType: 'subtestsFailed'|type: 'suite'", yaml):
+            continue
+        loc = re.search(r"location: '(.+):(\d+):\d+'", yaml)
+        err = re.search(r"error: (?:'(.*)'|\|-\n((?:\s+.*\n?)+?)\s*\w+:)", yaml + "\nend:")
+        message = err.group(1) or err.group(2) if err else ""
+        results.append({
+            "name": m.group(2).strip(),
+            "status": "fail" if m.group(1) == "not ok" else "pass",
+            "file": rel(loc.group(1)) if loc else None,
+            "line": int(loc.group(2)) if loc else 1,
+            "message": one_line(message),
+        })
+    return results
+
+
+def scan_node(words):
+    proc = run(with_tap(words))
+    found = []
+    for r in parse_tap(proc.stdout):
+        if r["status"] == "fail" and r["file"]:
+            found.append({"kind": "node", "id": r["name"], "name": r["name"], "file": r["file"], "line": r["line"], "message": r["message"]})
+    return found
+
+
+def check_node(file, name):
+    is_file = rel(name) == rel(file)
+    argv = ["node", "--test", "--test-reporter=tap"]
+    if not is_file:
+        argv.append("--test-name-pattern=^" + re.escape(name) + "$")
+    proc = run(argv + [file])
+    for r in parse_tap(proc.stdout):
+        if r["name"] == name or (is_file and rel(r["name"]) == rel(file)):
+            return r["status"], r["message"]
+    if is_file and proc.returncode == 0:
+        return "pass", ""
+    return None, one_line(proc.stderr or proc.stdout)
+
+
+# ------------------------------------------------------------------------------------------------
+# python -m unittest (-v)
+# ------------------------------------------------------------------------------------------------
+
+def unittest_top(args):
+    top = start = None
+    for flag, value in zip(args, args[1:]):
+        if flag in ("-t", "--top-level-directory"):
+            top = value
+        if flag in ("-s", "--start-directory"):
+            start = value
+    return top or start or "."
+
+
+def unittest_argv(args):
+    args = list(args)
+    if args and args[0] == "discover":
+        return ["python3", "-m", "unittest", "discover", "-v"] + args[1:]
+    return ["python3", "-m", "unittest", "-v"] + args
+
+
+def parse_unittest(text, top):
+    status = {}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\w+) \(([\w.]+)\)(?: \.\.\. (\w+))?", line)
+        if not m:
+            continue
+        word = m.group(3)
+        if word is None and i + 1 < len(lines):
+            nxt = re.search(r" \.\.\. (\w+)$", lines[i + 1])
+            word = nxt.group(1) if nxt else None
+        if word:
+            status[m.group(2)] = "fail" if word in ("FAIL", "ERROR") else "pass"
+    details = {}
+    for m in re.finditer(r"^(?:FAIL|ERROR): \w+ \(([\w.]+)\)\n(.*?)(?=^={20,}|^-{20,}\nRan |\Z)", text, re.S | re.M):
+        test_id, body = m.group(1), m.group(2)
+        method = test_id.rsplit(".", 1)[-1]
+        frames = re.findall(r'File "([^"]+)", line (\d+), in (\S+)', body)
+        frame = next((f for f in reversed(frames) if f[2] == method), frames[-1] if frames else None)
+        last = [l for l in body.strip().splitlines() if l.strip()]
+        details[test_id] = {
+            "file": rel(frame[0]) if frame else None,
+            "line": int(frame[1]) if frame else 1,
+            "message": one_line(last[-1] if last else ""),
+        }
+    return status, details
+
+
+def scan_unittest(args):
+    top = unittest_top(args)
+    proc = run(unittest_argv(args))
+    status, details = parse_unittest(proc.stderr, top)
+    found = []
+    for test_id, state in status.items():
+        if state != "fail":
+            continue
+        d = details.get(test_id, {})
+        loader = test_id.startswith("unittest.loader._FailedTest.")
+        file = d.get("file")
+        if not file or file.startswith(".."):
+            continue
+        found.append({
+            "kind": "unittest",
+            "id": test_id.split("unittest.loader._FailedTest.", 1)[-1] if loader else test_id,
+            "name": test_id,
+            "file": file,
+            "line": d.get("line", 1),
+            "message": d.get("message", ""),
+            "top": top,
+        })
+    return found
+
+
+def check_unittest(test_id, top):
+    proc = run(["python3", "-m", "unittest", "-v", test_id], cwd=os.path.join(WORKSPACE, top))
+    status, details = parse_unittest(proc.stderr, top)
+    for key in (test_id, f"unittest.loader._FailedTest.{test_id}"):
+        if key in status:
+            return status[key], details.get(key, {}).get("message", "")
+    # A module id runs many tests: any failure keeps it reproducing.
+    if status:
+        failing = [k for k, v in status.items() if v == "fail"]
+        return ("fail", details.get(failing[0], {}).get("message", "")) if failing else ("pass", "")
+    return None, one_line(proc.stderr)
+
+
+# ------------------------------------------------------------------------------------------------
+# pytest (-rfE)
+# ------------------------------------------------------------------------------------------------
+
+def def_line(file, name):
+    name = re.sub(r"\[.*$", "", name)
+    try:
+        with open(os.path.join(WORKSPACE, file)) as fh:
+            for i, line in enumerate(fh, 1):
+                if re.match(rf"\s*(?:async\s+)?def {re.escape(name)}\b", line):
+                    return i
+    except OSError:
+        pass
+    return 1
+
+
+def scan_pytest(args):
+    proc = run(["python3", "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider"] + list(args))
+    found = []
+    for m in re.finditer(r"^(FAILED|ERROR) (\S+?)(?: - (.*))?$", proc.stdout, re.M):
+        nodeid = m.group(2)
+        file = nodeid.split("::", 1)[0]
+        if not os.path.isfile(os.path.join(WORKSPACE, file)):
+            continue
+        found.append({
+            "kind": "pytest",
+            "id": nodeid,
+            "name": nodeid,
+            "file": file,
+            "line": def_line(file, nodeid.split("::")[-1]),
+            "message": one_line(m.group(3) or m.group(1)),
+        })
+    return found
+
+
+def check_pytest(nodeid):
+    proc = run(["python3", "-m", "pytest", "-rfE", "-q", "-p", "no:cacheprovider", nodeid])
+    if proc.returncode == 0:
+        return "pass", ""
+    if proc.returncode == 1:
+        m = re.search(r"^(?:FAILED|ERROR) \S+(?: - (.*))?$", proc.stdout, re.M)
+        return "fail", one_line(m.group(1) if m and m.group(1) else "")
+    return None, one_line(proc.stdout[-400:] + proc.stderr[-400:])
+
+
+# ------------------------------------------------------------------------------------------------
+# Anything else: the whole command
+# ------------------------------------------------------------------------------------------------
+
+def scan_suite(command):
+    proc = run(["sh", "-c", command])
+    if proc.returncode == 0:
+        return []
+    tail = [l for l in (proc.stdout + "\n" + proc.stderr).splitlines() if l.strip()]
+    return [{
+        "kind": "suite",
+        "id": command,
+        "name": command,
+        "file": "package.json",
+        "line": package_test_line(),
+        "message": one_line(tail[-1] if tail else f"exit {proc.returncode}"),
+    }]
+
+
+def check_suite(command):
+    proc = run(["sh", "-c", command])
+    return ("pass", "") if proc.returncode == 0 else ("fail", one_line(proc.stderr or proc.stdout))
+
+
+# ------------------------------------------------------------------------------------------------
+
+def scan():
+    found = []
+    for kind, what, _ in segments():
+        if kind == "node":
+            found += scan_node(what)
+        elif kind == "unittest":
+            found += scan_unittest(what)
+        elif kind == "pytest":
+            found += scan_pytest(what)
+        else:
+            found += scan_suite(what)
+    print(json.dumps(found))
+
+
+def check(kind, file, line, test_id, top="."):
+    if kind == "node":
+        state, message = check_node(file, test_id)
+    elif kind == "unittest":
+        state, message = check_unittest(test_id, top)
+    elif kind == "pytest":
+        state, message = check_pytest(test_id)
+    elif kind == "suite":
+        state, message = check_suite(test_id)
+    else:
+        fail(f"unknown test kind {kind!r}")
+    if state is None:
+        fail(f"could not find test {test_id!r} in the run: {message}")
+    if state == "fail":
+        print(f"REPRODUCED tests {test_id} at {file}:{line}-{line}: {message or 'the test fails'}")
+        sys.exit(1)
+    print(f"NOT REPRODUCED tests {test_id} in {file}: the test passes")
+    sys.exit(0)
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ["scan"]:
+        scan()
+    elif len(args) in (5, 6) and args[0] == "check":
+        check(*args[1:])
+    else:
+        fail("usage: repro-test scan | repro-test check <kind> <file> <line> <id> [top]")
+
+
+if __name__ == "__main__":
+    main()

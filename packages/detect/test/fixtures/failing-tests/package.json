@@ -1,0 +1,7 @@
+{
+  "name": "failing-tests-fixture",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/*.test.js\" && python3 -m unittest discover -s shop/tests -t ."
+  }
+}

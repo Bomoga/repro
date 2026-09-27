@@ -4,6 +4,7 @@ import { gitleaksAdapter } from "./adapters/gitleaks.ts";
 import { osvAdapter } from "./adapters/osv.ts";
 import { privacyPatternsAdapter } from "./adapters/privacy-patterns.ts";
 import { semgrepAdapter } from "./adapters/semgrep.ts";
+import { testsAdapter } from "./adapters/tests.ts";
 
 export interface DetectorFailure {
   detectorId: string;
@@ -29,7 +30,7 @@ export interface DetectOptions {
 
 // Detectors that run the target's own code, and so need its dependencies installed first. Everything
 // else is a static scanner, run before the install so it never walks an installed node_modules/.
-const RUNS_TARGET_CODE = new Set<string>();
+const RUNS_TARGET_CODE = new Set<string>([testsAdapter.id]);
 
 /** The dependency-install step for this Executor: only a real sandbox can install anything. */
 export function installFor(exec: Executor): ((workspace: Workspace) => Promise<InstallReport>) | undefined {
@@ -37,7 +38,7 @@ export function installFor(exec: Executor): ((workspace: Workspace) => Promise<I
 }
 
 export function defaultAdapters(): DetectorAdapter[] {
-  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter, osvAdapter];
+  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter, osvAdapter, testsAdapter];
 }
 
 // The Deterministic Detection Engine: runs every enabled adapter, nothing else. No model calls,
