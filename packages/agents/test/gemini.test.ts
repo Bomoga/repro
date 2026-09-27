@@ -4,6 +4,7 @@ import {
   GeminiError,
   MemoryInteractionLog,
   RequestBudget,
+  GOOGLE_SIGN_IN_COMMAND,
   createGeminiClient,
   geminiAuthFromEnv,
   googleSignIn,
@@ -447,6 +448,182 @@ describe("Google sign-in (REPRO_GEMINI_AUTH=google)", () => {
     }
     expect(() => geminiAuthFromEnv({ REPRO_GEMINI_AUTH: GEMINI_KEY })).toThrow(/^REPRO_GEMINI_AUTH must be "api-key" or "google"$/);
     expect(geminiAuthFromEnv({})).toBe("api-key");
+  });
+
+  // Fake credentials in Google's formats, to show none of them gets out.
+  const ACCESS_TOKEN = "ya29.a0FAKE-access-token";
+  const REFRESH_TOKEN = "1//0gFAKE-refresh-token";
+  const CLIENT_SECRET = "GOCSPX-FAKE-client-secret";
+  const API_KEY = "AIzaSyFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0";
+
+  /** How the SDK throws a failure from before a request goes out, like getting an access token: wrapped twice. */
+  function beforeSending(cause: Error): Error {
+    const message = `Unexpected HTTP client error: ${String(cause)}`;
+    const client = Object.assign(new Error(message, { cause }), { name: "UnexpectedClientError" });
+    return Object.assign(new Error(message, { cause: client }), { name: "APIConnectionError" });
+  }
+
+  /** A token refresh Google refused, shaped like the auth library's error, whose config holds the request's secrets. */
+  function refreshRefused(code: string, status = 400): Error {
+    return Object.assign(new Error(code), {
+      status,
+      code: status,
+      response: { status, data: { error: code, error_description: "Token has been expired or revoked." } },
+      config: { data: `refresh_token=${REFRESH_TOKEN}&client_secret=${CLIENT_SECRET}&grant_type=refresh_token` },
+    });
+  }
+
+  /** An API refusal as the SDK throws it, with Google's reason only in the raw body. */
+  function apiRefusal(status: number, message: string, reason: string): Error {
+    const body = [{ error: { code: status, message, status: status === 401 ? "UNAUTHENTICATED" : "PERMISSION_DENIED", details: [{ reason }] } }];
+    return Object.assign(new Error(`${status} API error occurred: {"httpMeta":{"response":{},"request":{}}}`), { status, body: JSON.stringify(body) });
+  }
+
+  it.each<[string, Error, string, number | undefined]>([
+    ["an expired sign-in", beforeSending(refreshRefused("invalid_grant")), "expired or been revoked (invalid_grant)", undefined],
+    ["a refused refresh", beforeSending(refreshRefused("invalid_client", 401)), "refused to refresh the access token (invalid_client)", undefined],
+    [
+      "no credentials",
+      beforeSending(new Error("Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.")),
+      "there are no Application Default Credentials",
+      undefined,
+    ],
+    [
+      "a missing credentials file",
+      beforeSending(Object.assign(new Error("Unable to read the credential file specified by the GOOGLE_APPLICATION_CREDENTIALS environment variable: The file at C:\\adc.json does not exist, or it is not a file."), { code: "ENOENT" })),
+      "couldn't get an access token from the Application Default Credentials (ENOENT)",
+      undefined,
+    ],
+    [
+      "a malformed credentials file",
+      beforeSending(new SyntaxError(`Unexpected token '1', "${REFRESH_TOKEN}"... is not valid JSON`)),
+      "(SyntaxError)",
+      undefined,
+    ],
+    ["a rejected token", apiRefusal(401, "Request had invalid authentication credentials.", "ACCESS_TOKEN_EXPIRED"), "Gemini rejected the access token", 401],
+    ["missing scopes", apiRefusal(403, "Request had insufficient authentication scopes.", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"), "it lacks the scopes Gemini needs", 403],
+    [
+      "a disabled API",
+      apiRefusal(403, "Generative Language API has not been used in project 123456789012 before or it is disabled.", "SERVICE_DISABLED"),
+      "the Generative Language API isn't enabled in repro-demo-123",
+      403,
+    ],
+    [
+      "a missing quota project",
+      apiRefusal(403, "The generativelanguage.googleapis.com API requires a quota project, which is not set by default.", "SERVICE_DISABLED"),
+      "requests can't be billed to REPRO_GEMINI_QUOTA_PROJECT (repro-demo-123)",
+      403,
+    ],
+    [
+      "a quota project the account can't use",
+      apiRefusal(403, "Caller does not have required permission to use project repro-demo-123.", "USER_PROJECT_DENIED"),
+      "requests can't be billed to REPRO_GEMINI_QUOTA_PROJECT (repro-demo-123)",
+      403,
+    ],
+    ["any other refusal", apiRefusal(403, "The caller does not have permission", "IAM_PERMISSION_DENIED"), "Gemini refused the signed-in account", 403],
+  ])("%s stops the request without a retry, saying what to do", async (_, error, says, status) => {
+    const { createSdk, calls } = sdkBuilder(fakeSdk(error));
+    const log = new MemoryInteractionLog();
+    const sleep = vi.fn(async () => {});
+    const failure = await createGeminiClient({ createSdk, env: SIGN_IN, log, sleep })
+      .interact(ask())
+      .catch((e: unknown) => e);
+    expect(failure).toMatchObject({ name: "GeminiError", status, retryable: false, message: expect.stringContaining(says) });
+    expect((failure as Error).message).toMatch(/^Google sign-in: /);
+    expect(calls).toHaveLength(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(log.entries.map((entry) => entry.error)).toEqual([{ status, message: (failure as Error).message }]);
+  });
+
+  it("points an expired sign-in at the exact command to run, and keeps the API's own words for a refusal", async () => {
+    const expired = await createGeminiClient({ createSdk: sdkBuilder(fakeSdk(beforeSending(refreshRefused("invalid_grant")))).createSdk, env: SIGN_IN })
+      .interact(ask())
+      .catch((e: unknown) => e);
+    expect((expired as Error).message).toContain(
+      "Sign in again: gcloud auth application-default login --client-id-file=client_secret.json --scopes='https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/generative-language.retriever'",
+    );
+    expect(GOOGLE_SIGN_IN_COMMAND).toContain("--scopes='https://www.googleapis.com/auth/cloud-platform,");
+
+    const disabled = apiRefusal(403, "Generative Language API has not been used in project 123456789012 before or it is disabled.", "SERVICE_DISABLED");
+    await expect(
+      createGeminiClient({ createSdk: sdkBuilder(fakeSdk(disabled)).createSdk, env: SIGN_IN }).interact(ask()),
+    ).rejects.toMatchObject({ message: expect.stringContaining("has not been used in project 123456789012") });
+  });
+
+  it("stops polling on a sign-in failure instead of riding it out", async () => {
+    const fake = fakeSdk({ id: "int-bg", status: "in_progress", steps: [] });
+    fake.polls.push(beforeSending(refreshRefused("invalid_grant")), completed);
+    const { createSdk, sdk } = sdkBuilder(fake);
+    await expect(
+      createGeminiClient({ createSdk, env: SIGN_IN, transport: "background", sleep: async () => {} }).interact(ask()),
+    ).rejects.toMatchObject({ retryable: false, message: expect.stringContaining("invalid_grant") });
+    expect(sdk.interactions.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("never lets a credential into an error, the log, or the console", async () => {
+    const failures = [
+      beforeSending(refreshRefused("invalid_grant")),
+      beforeSending(new SyntaxError(`Unexpected token '1', "${REFRESH_TOKEN}"... is not valid JSON`)),
+      // A quote from a damaged file can hold a token's middle, which has no telltale prefix, and look transient.
+      beforeSending(new SyntaxError(`Unexpected token 't', "timed out 0gFAKE-refre"... is not valid JSON`)),
+      beforeSending(new Error(`something new went wrong near ${ACCESS_TOKEN} and ${CLIENT_SECRET}`)),
+      Object.assign(new TypeError(`fetch failed near ${ACCESS_TOKEN}`), { cause: { code: "UND_ERR_SOCKET", message: REFRESH_TOKEN } }),
+      httpError(500, `upstream echoed ${API_KEY} and ${ACCESS_TOKEN}`),
+      httpError(400, `bad request quoting ${CLIENT_SECRET}`),
+    ];
+    const consoles = (["log", "info", "warn", "error", "debug"] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    try {
+      const log = new MemoryInteractionLog();
+      const thrown: unknown[] = [];
+      for (const error of failures) {
+        const client = createGeminiClient({ createSdk: sdkBuilder(fakeSdk(error)).createSdk, env: SIGN_IN, log, retry: { maxAttempts: 1 } });
+        thrown.push(await client.interact(ask()).catch((e: unknown) => e));
+      }
+      expect(thrown.every((error) => error instanceof GeminiError)).toBe(true);
+      const everything = JSON.stringify({
+        thrown: thrown.map((error) => [String(error), (error as GeminiError).message]),
+        log: log.entries,
+        console: consoles.flatMap((spy) => spy.mock.calls),
+      });
+      expect(everything).not.toMatch(/FAKE/);
+      expect(everything).toContain("[redacted]"); // what passes through is masked, not dropped
+    } finally {
+      for (const spy of consoles) spy.mockRestore();
+    }
+  });
+
+  it("keeps 429, per-day quota, and request-budget behaviour as in api-key mode", async () => {
+    const perMinute = sdkBuilder(fakeSdk(httpError(429, "Resource exhausted, please retry in 1.5s"), completed));
+    const sleeps: number[] = [];
+    await expect(
+      createGeminiClient({ createSdk: perMinute.createSdk, env: SIGN_IN, sleep: async (ms) => void sleeps.push(ms) }).interact(ask()),
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(1500);
+
+    const perDay = sdkBuilder(fakeSdk(httpError(429, "Rate limit exceeded (limit: 250 requests per day)")));
+    const spent = await createGeminiClient({ createSdk: perDay.createSdk, env: SIGN_IN, sleep: async () => {} })
+      .interact(ask())
+      .catch((e: unknown) => e);
+    expect(isDailyQuotaExhausted(spent)).toBe(true);
+    expect(perDay.calls).toHaveLength(1);
+
+    const budget = new RequestBudget(1);
+    const client = createGeminiClient({ createSdk: sdkBuilder(fakeSdk(completed, completed)).createSdk, env: SIGN_IN, budget });
+    await client.interact(ask("challenger"));
+    await expect(client.interact(ask("challenger"))).rejects.toSatisfy(isBudgetExhausted);
+  });
+
+  it("leaves api-key mode's failures as they were", async () => {
+    const disabled = apiRefusal(403, "Generative Language API has not been used in project 123456789012 before or it is disabled.", "SERVICE_DISABLED");
+    const failure = await createGeminiClient({ createSdk: sdkBuilder(fakeSdk(disabled)).createSdk, env: { GEMINI_API_KEY: "test-key" } })
+      .interact(ask())
+      .catch((e: unknown) => e);
+    expect(failure).toMatchObject({
+      status: 403,
+      retryable: false,
+      message: '403 API error occurred: {"httpMeta":{"response":{},"request":{}}}: Generative Language API has not been used in project 123456789012 before or it is disabled.',
+    });
   });
 });
 

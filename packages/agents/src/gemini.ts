@@ -232,6 +232,9 @@ export const GOOGLE_SIGN_IN_SCOPES = [
   "https://www.googleapis.com/auth/generative-language.retriever",
 ] as const;
 
+/** The sign-in every sign-in error points to, as in Google's guide: client_secret.json is the Desktop OAuth client's file. */
+export const GOOGLE_SIGN_IN_COMMAND = `gcloud auth application-default login --client-id-file=client_secret.json --scopes='${GOOGLE_SIGN_IN_SCOPES.join(",")}'`;
+
 // Built without a key, the SDK takes one from these when either is set, whatever else it's given.
 const API_KEY_VARIABLES = ["GEMINI_API_KEY", "GOOGLE_API_KEY"] as const;
 // A Google Cloud project ID, domain-scoped ones included, or a project number.
@@ -332,14 +335,16 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
   const proModels = new Set([modelFor("diagnose", env), modelFor("challenger", env)]);
   const charge = (model: string) => options.budget?.charge(model, proModels.has(model));
   let sdk = options.sdk;
+  let signIn: { quotaProject: string } | undefined;
+  const failureOf = (error: unknown): GeminiError => (signIn ? signInFailure(error, signIn.quotaProject) : classify(error));
 
   const getSdk = (): InteractionsSdk => {
     if (!sdk) {
       const build = options.createSdk ?? buildSdk;
       if ((options.auth ?? geminiAuthFromEnv(env)) === "google") {
         if (options.apiKey !== undefined) throw new GeminiError("the apiKey option can't be combined with Google sign-in", undefined, false);
-        const { quotaProject } = googleSignIn(env, options.quotaProject);
-        sdk = build(googleSignInSdkOptions(quotaProject));
+        signIn = googleSignIn(env, options.quotaProject);
+        sdk = build(googleSignInSdkOptions(signIn.quotaProject));
       } else {
         const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
         if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
@@ -374,7 +379,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
         raw = await api.get(idOf(raw), undefined, { maxRetries: 0, timeout: HTTP_TIMEOUT_MS });
         pollFailures = 0;
       } catch (error) {
-        const failure = classify(error);
+        const failure = failureOf(error);
         if (!failure.retryable || ++pollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw failure;
       }
     }
@@ -408,7 +413,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
           if (response.status !== "failed") return response;
           failure = new GeminiError(`interaction ${response.interactionId} failed`, undefined, true);
         } catch (error) {
-          failure = error instanceof GeminiError ? error : classify(error);
+          failure = error instanceof GeminiError ? error : failureOf(error);
           log.record({
             ...entry,
             durationMs: Date.now() - started,
@@ -608,6 +613,114 @@ function apiErrorDetail(e: { body?: unknown; error?: unknown; cause?: unknown; m
     if (typeof detail === "string" && detail && !String(e.message ?? "").includes(detail)) return detail;
   }
   return "";
+}
+
+const NO_CREDENTIALS = /Could not load the default credentials/;
+const QUOTA_PROJECT_REFUSED = /USER_PROJECT_DENIED|USER_PROJECT_INVALID|quota project/i;
+const SCOPES_MISSING = /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i;
+const API_DISABLED = /SERVICE_DISABLED|has not been used in project|it is disabled/i;
+// Google's access and refresh tokens, OAuth client secrets, API keys, and signed JWTs, by their shapes.
+const CREDENTIAL = /\bya29\.[\w.~+/=-]+|\b1\/\/[\w.~+/=-]+|\bGOCSPX-[\w-]+|\bAIza[\w-]{35}|\beyJ[\w-]+\.[\w-]+\.[\w-]+/g;
+
+/**
+ * A failure under Google sign-in. The ones that mean the sign-in itself is broken become
+ * non-retryable errors saying what to run; the rest are classified as in api-key mode. The auth
+ * library's own words never pass through (parsing a malformed credentials file, it can quote the
+ * file), and credential-shaped text is masked in whatever does.
+ */
+function signInFailure(error: unknown, quotaProject: string): GeminiError {
+  const failure = classify(error);
+  const chain = causes(error);
+  const signInAgain = `Sign in again: ${GOOGLE_SIGN_IN_COMMAND}`;
+  const refuse = (message: string, apiSays = false) =>
+    new GeminiError(`Google sign-in: ${message}${apiSays ? ` (${maskCredentials(failure.message)})` : ""}`, failure.status, false);
+
+  const oauth = chain.map(oauthError).find((code) => code !== undefined);
+  if (oauth === "invalid_grant") {
+    return refuse(`it has expired or been revoked (invalid_grant); while the OAuth consent screen is in Testing, Google ends a sign-in 7 days after consent. ${signInAgain}`);
+  }
+  if (oauth) return refuse(`Google refused to refresh the access token (${oauth}). ${signInAgain}`);
+  if (chain.some((e) => NO_CREDENTIALS.test(messageOf(e)))) {
+    return refuse(`there are no Application Default Credentials on this machine. Sign in: ${GOOGLE_SIGN_IN_COMMAND}, or point GOOGLE_APPLICATION_CREDENTIALS at a credentials file`);
+  }
+  if (failure.status === undefined) {
+    // The SDK wraps whatever fails before a request goes out, getting its access token included.
+    const beforeSending = chain.some((e) => nameOf(e) === "UnexpectedClientError");
+    if (beforeSending && (!failure.retryable || chain.some((e) => e instanceof SyntaxError))) {
+      return refuse(
+        `couldn't get an access token from the Application Default Credentials (${labelOf(chain.at(-1))}); the credentials file may be missing, unreadable, or damaged. ${signInAgain}, or fix the file GOOGLE_APPLICATION_CREDENTIALS names`,
+      );
+    }
+  } else if (failure.status === 401 || failure.status === 403) {
+    const says = errorText(error);
+    if (QUOTA_PROJECT_REFUSED.test(says)) {
+      return refuse(
+        `requests can't be billed to REPRO_GEMINI_QUOTA_PROJECT (${quotaProject}): check the project ID, and that the signed-in account may use it (serviceusage.services.use, in the Service Usage Consumer role)`,
+        true,
+      );
+    }
+    if (SCOPES_MISSING.test(says)) return refuse(`it lacks the scopes Gemini needs. ${signInAgain}`, true);
+    if (API_DISABLED.test(says)) {
+      return refuse(`the Generative Language API isn't enabled in ${quotaProject}: enable it in the Cloud console's API Library, then retry`, true);
+    }
+    if (failure.status === 401) return refuse(`Gemini rejected the access token. ${signInAgain}`, true);
+    return refuse(`Gemini refused the signed-in account: check that it may use ${quotaProject} and that the Generative Language API is enabled there`, true);
+  }
+  return new GeminiError(maskCredentials(failure.message), failure.status, failure.retryable);
+}
+
+/** An error and the causes it wraps, outermost first: the SDK wraps what the auth library throws twice over. */
+function causes(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  for (let e = error; typeof e === "object" && e !== null && chain.length < 8 && !chain.includes(e); e = (e as { cause?: unknown }).cause) {
+    chain.push(e);
+  }
+  return chain;
+}
+
+/** The OAuth error code (RFC 6749, section 5.2) a token refresh was refused with, like invalid_grant. */
+function oauthError(error: unknown): string | undefined {
+  const response = (error as { response?: { status?: unknown; data?: { error?: unknown } } }).response;
+  const code = response?.data?.error;
+  const refused = typeof response?.status === "number" && response.status >= 400 && response.status < 500;
+  return refused && typeof code === "string" && /^[a-z_]{1,40}$/.test(code) ? code : undefined;
+}
+
+function messageOf(error: unknown): string {
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? message : "";
+}
+
+function nameOf(error: unknown): string {
+  const name = (error as { name?: unknown }).name;
+  return typeof name === "string" ? name : "";
+}
+
+/** What to call an error without quoting it: its code when that's an identifier like ENOENT, else its name. */
+function labelOf(error: unknown): string {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return code;
+  const name = error === undefined ? "" : nameOf(error);
+  return /^\w{1,40}$/.test(name) ? name : "unknown error";
+}
+
+/** All an API error says of itself: its message and raw body, which is where Google puts reasons like SERVICE_DISABLED. */
+function errorText(error: unknown): string {
+  const e = (error ?? {}) as { message?: unknown; body?: unknown; error?: unknown };
+  return [e.message, e.body, e.error]
+    .map((part) => {
+      if (typeof part === "string") return part;
+      try {
+        return JSON.stringify(part) ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join(" ");
+}
+
+function maskCredentials(text: string): string {
+  return text.replace(CREDENTIAL, "[redacted]");
 }
 
 function backoffMs(attempt: number, message: string, policy: RetryPolicy): number {
