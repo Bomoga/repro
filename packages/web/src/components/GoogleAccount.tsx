@@ -31,11 +31,19 @@ export function GoogleAccount({ status }: { status: Poll<GoogleSignInStatus> }) 
   }
 
   return (
-    <a className="account account__signin" href={googleSignInUrl()} title="Sign the control plane in to Google for Gemini">
+    <a
+      className="account account__signin"
+      href={googleSignInUrl()}
+      title={
+        s.signedIn
+          ? "Signed in, but this sign-in didn't record which account; sign in again to show it"
+          : "Sign the control plane in to Google so Diagnose, Repair, and the Challenger can use Gemini"
+      }
+    >
       <span className="account__mark" aria-hidden="true">
         G
       </span>
-      {s.signedIn ? "Sign in again to show the account" : "Sign in with Google"}
+      Sign in with Google
     </a>
   );
 }
