@@ -285,6 +285,66 @@ input::placeholder {
   --dot: transparent;
 }
 
+.account {
+  order: 2;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 64px;
+  font-size: 20px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.account + .server {
+  margin-left: 28px;
+}
+
+.account__mark {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.account__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+
+.account__switch {
+  font-size: 18px;
+  color: var(--ink2);
+}
+
+.account__signin {
+  align-self: center;
+  height: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--ink);
+  text-decoration: none;
+}
+
+.account__signin:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+@media (max-width: 719.98px) {
+  .account__email {
+    max-width: 16ch;
+  }
+
+  .account + .server {
+    margin-left: 12px;
+  }
+}
+
 @media (max-width: 719.98px) {
   .masthead__nav {
     order: 3;

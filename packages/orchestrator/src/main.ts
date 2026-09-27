@@ -7,6 +7,7 @@ import { DEFAULT_SANDBOX_IMAGE, DockerExecutor, sandboxAvailable } from "@repro/
 import { geminiAtStartup, geminiStartupLine, positiveIntegerFromEnv } from "./config.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { GitHubPullRequests } from "./pull-request.ts";
+import { LocalBranches, RoutedPullRequests, pullRequestModeFromEnv } from "./local-branches.ts";
 import { PullRequestSync } from "./pull-request-sync.ts";
 
 // The control plane in one process: the API and the Run Orchestrator on the same Run Store, so
@@ -28,6 +29,9 @@ import { PullRequestSync } from "./pull-request-sync.ts";
 //   REPRO_API=off           only the orchestrator, beside an API process on the same Atlas store
 //   REPRO_GITHUB_TOKEN      open a PR for each verified Patch on a GitHub target (unset: no PRs),
 //                           and poll those PRs so a merge or close on GitHub settles the Patch
+//   REPRO_PR_MODE           where verified patches go: auto (default: a GitHub PR when the token can
+//                           push to the repo, else a local branch), github, or local (a commit on
+//                           repro/<patch> in a clone under ~/.repro/local-branches)
 //   REPRO_GITHUB_WEBHOOK_SECRET  also take GitHub's pull_request webhook at POST /github/webhook
 //   REPRO_KEEP_WORKSPACES=1 keep each Run's workspace after it finishes
 //   REPRO_PRO_REQUEST_BUDGET  the most requests one Run sends to the Pro-tier models (the ones behind
@@ -60,6 +64,8 @@ async function main(): Promise<void> {
   const executor = new DockerExecutor();
   const token = process.env.REPRO_GITHUB_TOKEN;
   const octokit = token ? new Octokit({ auth: token }) : undefined;
+  const prMode = pullRequestModeFromEnv();
+  if (prMode === "github" && !octokit) throw new Error("REPRO_PR_MODE=github needs REPRO_GITHUB_TOKEN");
   const say = (line: string) => console.log(line);
   const orchestrator = new Orchestrator({
     store,
@@ -67,7 +73,7 @@ async function main(): Promise<void> {
     gemini: gemini.auth === "none" ? undefined : (log, budget) => createGeminiClient({ log, budget }),
     proRequestBudget,
     repairConcurrency,
-    pullRequests: octokit ? new GitHubPullRequests(octokit, executor) : undefined,
+    pullRequests: new RoutedPullRequests(prMode, new LocalBranches(), octokit ? new GitHubPullRequests(octokit, executor) : undefined, octokit),
     keepWorkspace: process.env.REPRO_KEEP_WORKSPACES === "1",
     say,
   });
@@ -85,7 +91,8 @@ async function main(): Promise<void> {
   if (stale.length > 0) {
     console.log(`left running by an earlier process, and won't resume: ${stale.map((run) => run.id).join(", ")}`);
   }
-  console.log(`orchestrator polling the ${store.kind} run store; pull requests ${token ? "on" : "off (set REPRO_GITHUB_TOKEN to open them)"}`);
+  const prWhere = prMode === "local" || !token ? "local branches under ~/.repro/local-branches" : prMode === "github" ? "GitHub PRs" : "GitHub PRs where the token can push, local branches elsewhere";
+  console.log(`orchestrator polling the ${store.kind} run store; verified patches go to ${prWhere} (REPRO_PR_MODE=${prMode})`);
   console.log(geminiStartupLine(gemini));
   console.log(proRequestBudget ? `each run may send ${proRequestBudget} requests to the Pro-tier models` : "no cap on a run's Pro-tier requests (set REPRO_PRO_REQUEST_BUDGET for one)");
   console.log(repairConcurrency > 1 ? `each run repairs up to ${repairConcurrency} diagnoses at once` : "each run repairs one diagnosis at a time (REPRO_REPAIR_CONCURRENCY raises it)");

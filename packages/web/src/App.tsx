@@ -11,6 +11,7 @@ import { Overview } from "./components/Overview.tsx";
 import { ReviewQueue } from "./components/ReviewQueue.tsx";
 import { RunSheet } from "./components/RunSheet.tsx";
 import { RunsList } from "./components/RunsList.tsx";
+import { GoogleAccount } from "./components/GoogleAccount.tsx";
 import { ServerStatus, serverState } from "./components/ServerStatus.tsx";
 import { Toasts, useToasts } from "./components/Toasts.tsx";
 import { MainTabs } from "./components/UnderlineTabs.tsx";
@@ -22,6 +23,7 @@ export function App() {
   const [route, navigate] = useRoute();
   const summaries = usePoll(api.summaries, 4000, "summaries");
   const health = usePoll(api.health, 10_000, "health");
+  const google = usePoll(api.googleAccount, 15_000, "google");
   const review = useReviewQueue(summaries.data);
   const [toasts, toast] = useToasts();
   const [logoKey, setLogoKey] = useState(0);
@@ -97,6 +99,7 @@ export function App() {
               counts={summaries.data ? { runs: summaries.data.length, ...(review.data ? { review: review.data.length } : {}) } : {}}
             />
           </nav>
+          <GoogleAccount status={google} />
           <ServerStatus state={server} />
         </div>
       </header>

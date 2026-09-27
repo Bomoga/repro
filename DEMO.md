@@ -33,3 +33,21 @@ Without a Gemini key, `npm run demo` still scans for real: each run ingests, det
 5. **Review tab.** Merge or reject each verified patch with its evidence: checks, Challenger note, diff, and the reproduction after the patch.
 
 The seeded issues and their intended fixes are in `DEMO_SEEDED_ISSUES.md`. Keep that file out of the target repo.
+
+## Use Repro from Claude (MCP)
+`.mcp.json` registers a `repro` MCP server, so Claude Code opened in this repo picks it up. Any other MCP client can run `node --import tsx packages/mcp/src/server.ts` with `REPRO_API_URL` pointing at the control plane.
+
+It has five tools:
+- `repro_scan`
+- `repro_list_runs`
+- `repro_get_run`
+- `repro_report`
+- `repro_decide_patch`
+
+They take the same inputs as the dashboard: a target, IDs, and merge or reject.
+
+## Where verified patches go
+Set `REPRO_PR_MODE` in `.env`:
+- `auto` (default): a GitHub PR when `REPRO_GITHUB_TOKEN` can push to the target repo. Otherwise a local branch: someone else's repo, no token, or a local target.
+- `github`: always a GitHub PR. Needs the token.
+- `local`: always a local branch. Each verified patch becomes a commit on `repro/<patch>` in a clone under `~/.repro/local-branches/`, based on the commit that was scanned. The dashboard shows it as "Local branch".
