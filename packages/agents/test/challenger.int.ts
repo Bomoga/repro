@@ -6,7 +6,7 @@ import { SQLI_DIAGNOSIS } from "./fixtures/diagnoses.js";
 import { FIXTURE_FINDINGS, PLANTED_SECRET } from "./fixtures/findings.js";
 import { JOINED_FIX, SOUND_FIX } from "./fixtures/scripts.js";
 import { FixtureExecutor, demoTargetHandlers, simulatedInjectionCounterTest } from "./helpers/executor.js";
-import { scriptedGemini, type ScriptedReply } from "./helpers/gemini.js";
+import { realGeminiConfigured, scriptedGemini, type ScriptedReply } from "./helpers/gemini.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
 // The Challenger on the real Gemini API. Its counter-tests can only really be judged in the
@@ -25,7 +25,7 @@ function report(label: string, result: ChallengeResult, log: MemoryInteractionLo
   console.log(`  gemini: ${log.entries.length} calls on ${log.entries[0]?.model}, ${seconds}s, ~${tokens} tokens`);
 }
 
-describe.skipIf(!process.env.GEMINI_API_KEY)("challenge against the real Gemini API (simulated counter-test runs)", () => {
+describe.skipIf(!realGeminiConfigured())("challenge against the real Gemini API (simulated counter-test runs)", () => {
   let fixture: FixtureWorkspace;
   let executor: FixtureExecutor;
   let log: MemoryInteractionLog;

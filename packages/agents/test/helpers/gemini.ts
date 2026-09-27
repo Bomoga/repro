@@ -1,4 +1,13 @@
-import type { FunctionCall, GeminiClient, GeminiRole, InteractRequest } from "../../src/gemini.js";
+import { geminiAuthFromEnv, type FunctionCall, type GeminiClient, type GeminiRole, type InteractRequest } from "../../src/gemini.js";
+
+/**
+ * Whether the real-API tests (*.int.ts) have a way in: GEMINI_API_KEY, or the Google sign-in
+ * (REPRO_GEMINI_AUTH=google). They skip without either. A REPRO_GEMINI_AUTH typo throws rather than
+ * skip, and with both set they run and the wrapper refuses the mix, as the control plane would.
+ */
+export function realGeminiConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.GEMINI_API_KEY) || geminiAuthFromEnv(env) === "google";
+}
 
 export type ScriptedCall = { name: string; args?: object };
 /** A batch of tool calls, or a final text answer. */

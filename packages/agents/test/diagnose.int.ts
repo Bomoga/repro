@@ -3,9 +3,10 @@ import { DiagnosisSchema } from "../src/contracts.js";
 import { diagnose, isRepairEligible, type DiagnoseResult } from "../src/diagnose/diagnose.js";
 import { MemoryInteractionLog, createGeminiClient, modelFor } from "../src/gemini.js";
 import { FIXTURE_FINDINGS, HARDCODED_KEY, PLANTED_SECRET, PROMPT_LOGGED, SQLI_NOTE_ID, SQLI_OWNER } from "./fixtures/findings.js";
+import { realGeminiConfigured } from "./helpers/gemini.js";
 import { materializeWorkspace, type FixtureWorkspace } from "./helpers/workspace.js";
 
-describe.skipIf(!process.env.GEMINI_API_KEY)("diagnose against the real Gemini API", () => {
+describe.skipIf(!realGeminiConfigured())("diagnose against the real Gemini API", () => {
   let fixture: FixtureWorkspace;
   let result: DiagnoseResult;
   const log = new MemoryInteractionLog();

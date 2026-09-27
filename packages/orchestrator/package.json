@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "tsx src/main.ts",
+    "gemini:check": "tsx src/gemini-check.ts",
     "test": "vitest run"
   },
   "dependencies": {

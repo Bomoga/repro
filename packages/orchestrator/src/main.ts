@@ -4,14 +4,23 @@ import { Octokit } from "@octokit/rest";
 import { createGeminiClient } from "@repro/agents";
 import { buildApp, openRunStore } from "@repro/api";
 import { DEFAULT_SANDBOX_IMAGE, DockerExecutor, sandboxAvailable } from "@repro/executor";
-import { positiveIntegerFromEnv } from "./config.ts";
+import { geminiAtStartup, geminiStartupLine, positiveIntegerFromEnv } from "./config.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { GitHubPullRequests } from "./pull-request.ts";
 import { PullRequestSync } from "./pull-request-sync.ts";
 
 // The control plane in one process: the API and the Run Orchestrator on the same Run Store, so
 // the in-memory store works as well as Atlas. Environment (the repo-root .env is read first):
-//   GEMINI_API_KEY          required: Diagnose, Repair, and the Challenger run on Gemini
+//   REPRO_GEMINI_AUTH       how Diagnose, Repair, and the Challenger reach Gemini: api-key (default)
+//                           or google, the operator's Google sign-in instead of a key (README.md has
+//                           the setup); anything else fails at startup, which prints the mode
+//   GEMINI_API_KEY          required with api-key. With google it must be unset, GOOGLE_API_KEY too,
+//                           or the SDK would send it instead of the sign-in
+//   REPRO_GEMINI_QUOTA_PROJECT  required with google: the Google Cloud project ID its requests are
+//                           billed to, printed at startup. The sign-in itself is the Application
+//                           Default Credentials from `gcloud auth application-default login` (or the
+//                           file GOOGLE_APPLICATION_CREDENTIALS names): startup checks the file is
+//                           there, and never opens it.
 //   MONGODB_URI             Lane 1's Atlas store (unset: in-memory, lost on restart)
 //   MONGODB_DB              database name, when the URI doesn't name one
 //   PORT, HOST              the API's listen address (default 127.0.0.1:4000)
@@ -34,7 +43,7 @@ const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 async function main(): Promise<void> {
-  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set; Diagnose, Repair, and the Challenger need it.");
+  const gemini = geminiAtStartup();
   const proRequestBudget = positiveIntegerFromEnv("REPRO_PRO_REQUEST_BUDGET");
   const repairConcurrency = positiveIntegerFromEnv("REPRO_REPAIR_CONCURRENCY") ?? 1;
   if (!(await sandboxAvailable())) {
@@ -76,6 +85,7 @@ async function main(): Promise<void> {
     console.log(`left running by an earlier process, and won't resume: ${stale.map((run) => run.id).join(", ")}`);
   }
   console.log(`orchestrator polling the ${store.kind} run store; pull requests ${token ? "on" : "off (set REPRO_GITHUB_TOKEN to open them)"}`);
+  console.log(geminiStartupLine(gemini));
   console.log(proRequestBudget ? `each run may send ${proRequestBudget} requests to the Pro-tier models` : "no cap on a run's Pro-tier requests (set REPRO_PRO_REQUEST_BUDGET for one)");
   console.log(repairConcurrency > 1 ? `each run repairs up to ${repairConcurrency} diagnoses at once` : "each run repairs one diagnosis at a time (REPRO_REPAIR_CONCURRENCY raises it)");
   if (app && process.env.REPRO_GITHUB_WEBHOOK_SECRET) console.log("github webhook at POST /github/webhook");

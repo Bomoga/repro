@@ -11,12 +11,13 @@ import { diagnose, isRepairEligible } from "../src/diagnose/diagnose.js";
 import { MemoryInteractionLog, createGeminiClient } from "../src/gemini.js";
 import { repairAndVerify, type RepairAndVerifyResult } from "../src/pipeline.js";
 import { PLANTED_SECRET } from "./fixtures/findings.js";
+import { realGeminiConfigured } from "./helpers/gemini.js";
 import { DEMO_TARGET } from "./helpers/workspace.js";
 
 // Lane 3 on the real stack: Lane 2's ingest, detectors, and reproduction step, the Docker
 // sandbox for every command (tests, reproduction re-runs, git, counter-tests), and the real
 // Gemini API. Skipped unless the sandbox image is built (`npm run sandbox:build`).
-const ready = Boolean(process.env.GEMINI_API_KEY) && (await sandboxAvailable());
+const ready = realGeminiConfigured() && (await sandboxAvailable());
 
 describe.skipIf(!ready)("lane 3 on the real sandbox and the real Gemini API", () => {
   const exec = new DockerExecutor();
