@@ -1,0 +1,30 @@
+[
+ {
+  "code": "S602",
+  "message": "`subprocess` call with `shell=True` identified, security issue",
+  "filename": "/workspace/app/jobs.py",
+  "location": {
+   "column": 12,
+   "row": 5
+  },
+  "end_location": {
+   "column": 27,
+   "row": 5
+  },
+  "name": "subprocess-popen-with-shell-equals-true"
+ },
+ {
+  "code": "B006",
+  "message": "Do not use mutable data structures for argument defaults",
+  "filename": "/workspace/app/jobs.py",
+  "location": {
+   "column": 24,
+   "row": 8
+  },
+  "end_location": {
+   "column": 26,
+   "row": 8
+  },
+  "name": "mutable-argument-default"
+ }
+]

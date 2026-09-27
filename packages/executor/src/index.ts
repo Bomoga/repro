@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export * from "./docker-executor.ts";
+export * from "./install.ts";
 
 // Where ingested workspaces live on the host. Under $HOME by default because Docker Desktop and
 // Colima on macOS only share the home directory with the VM, so a workspace under the system

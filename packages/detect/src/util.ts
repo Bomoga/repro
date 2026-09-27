@@ -58,6 +58,26 @@ const EVIDENCE_MAX_LINES = 20;
 const EVIDENCE_MAX_CHARS = 2000;
 const EVIDENCE_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
+/** A workspace file's text, read on the host; undefined if it resolves outside the workspace. */
+export function readWorkspaceFile(workspacePath: string, file: string): string | undefined {
+  try {
+    const root = realpathSync(workspacePath);
+    const full = realpathSync(join(root, file));
+    if (!full.startsWith(root + sep)) return undefined;
+    const fd = openSync(full, "r");
+    try {
+      const size = Math.min(fstatSync(fd).size, EVIDENCE_MAX_FILE_BYTES);
+      const buf = Buffer.alloc(size);
+      readSync(fd, buf, 0, size, 0);
+      return buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 // The exact lines a Finding points at, read from the workspace on the host (a read, not an
 // execution). Refuses anything that resolves outside the workspace, and redacts secrets.
 export function readEvidence(workspacePath: string, file: string, lineStart: number, lineEnd: number): string {

@@ -13,10 +13,11 @@ FROM node:22-bookworm-slim AS node
 FROM python:3.12-slim-bookworm
 
 ARG SEMGREP_VERSION=1.176.0
+ARG RUFF_VERSION=0.16.9
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" \
+    && pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" "ruff==${RUFF_VERSION}" \
     && git config --system --add safe.directory '*'
 
 COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/gitleaks

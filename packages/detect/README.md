@@ -15,11 +15,25 @@ const { findings: confirmed, attempts } = await reproduce(findings, workspace, e
 |---|---|---|---|
 | `semgrep` | Semgrep registry packs (JS/TS, Python) | code vulnerabilities, correctness | `repro-semgrep-rule registry <rule> <file>` |
 | `gitleaks` | gitleaks, always `--redact` | hardcoded secrets | `repro-gitleaks-rule <rule> <file>` |
-| `privacy-patterns` | Semgrep, Repro's own pack (`sandbox/rules/privacy-patterns`) | the Assurant privacy checks | `repro-semgrep-rule privacy-patterns <rule> <file>` |
+| `privacy-patterns` | Semgrep, Repro's own pack (`sandbox/rules/privacy-patterns`) | the Assurant privacy checks | `repro-canary <check> <file> <function> <line> privacy-patterns <rule>` where the flagged function can be called (Python/JS), else `repro-semgrep-rule privacy-patterns <rule> <file>` |
 | `osv-scanner` | osv-scanner, offline, against the image's OSV snapshot | known-vulnerable dependency versions in npm/PyPI lockfiles | `repro-osv check <lockfile> <package> <advisory>` |
+| `ruff` | Ruff's Bandit (S, minus S101) and bugbear (B) rules | Python security issues and likely bugs | `repro-ruff-rule <code> <file>` |
+| `tests` | the project's own test command (`node --test`, unittest, pytest per test; anything else as a whole) | failing tests | `repro-test check <kind> <file> <line> <test>` |
 
 All scanners and rule packs are baked into the sandbox image (`npm run sandbox:build`); containers
 run with no network, so a rebuild is what refreshes the Semgrep registry rules and the OSV database.
+
+`detect()` installs the target's dependencies (`@repro/executor`'s `installDependencies`) after the
+static scanners and before `tests`, the only detector that runs the target's code. The Python venv
+it builds under `.repro/` is never on PATH; the target's Python runs through `repro-python`, which
+uses the venv only once the install step has marked it as built and nothing under `.repro/` is part
+of the target's own commit.
+
+`repro-canary` calls the flagged function with a unique canary and checks the rule's sink (logs,
+plaintext storage, outbound requests, captured above TLS for the common HTTP clients). A call it
+can't observe, or a request whose payload it can't see, is "can't decide", never "fixed": it falls
+back to the Semgrep rule, and a function that still reaches the network in a way the canary can't
+see into doesn't count as fixed even when the rule stops matching.
 
 ## Reproduction protocol
 

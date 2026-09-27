@@ -1,0 +1,19 @@
+[
+    {
+        "kind": "node",
+        "id": "totals every line item",
+        "name": "totals every line item",
+        "file": "test/cart.test.js",
+        "line": 16,
+        "message": "Expected values to be strictly equal: 6 !== 11"
+    },
+    {
+        "kind": "unittest",
+        "id": "shop.tests.test_pricing.PricingTest.test_discount",
+        "name": "shop.tests.test_pricing.PricingTest.test_discount",
+        "file": "shop/tests/test_pricing.py",
+        "line": 11,
+        "message": "AssertionError: 190 != 180",
+        "top": "."
+    }
+]
