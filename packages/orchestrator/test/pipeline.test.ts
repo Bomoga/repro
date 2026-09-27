@@ -113,6 +113,18 @@ describe("processRun", () => {
     expect(unconfirmed.deps.stages.repairAndVerify).not.toHaveBeenCalled();
   });
 
+  it("without a Gemini client, keeps the reproduced findings and completes without diagnosing", async () => {
+    const { store, deps, moves, queue } = harness();
+    const claimed = await queue();
+    const done = await processRun(claimed, { ...deps, gemini: undefined });
+
+    expect(done).toMatchObject({ stage: "done", status: "completed" });
+    expect(moves).toEqual(["detect/running", "done/completed"]);
+    expect(await store.listFindings(claimed.id)).toMatchObject([{ id: "fnd_sqli", reproducible: true }, { id: "fnd_style", reproducible: false }]);
+    expect(deps.stages.diagnose).not.toHaveBeenCalled();
+    expect(deps.stages.repairAndVerify).not.toHaveBeenCalled();
+  });
+
   it("keeps going past a repair that throws, and fails the run only when every repair did", async () => {
     const twoRepairable = () => {
       const h = harness();

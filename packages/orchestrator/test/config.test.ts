@@ -24,7 +24,12 @@ describe("geminiAtStartup", () => {
   it("requires GEMINI_API_KEY with an API key, as always", () => {
     expect(geminiAtStartup({ GEMINI_API_KEY: KEY })).toEqual({ auth: "api-key" });
     expect(geminiAtStartup({ GEMINI_API_KEY: KEY, REPRO_GEMINI_AUTH: "api-key" })).toEqual({ auth: "api-key" });
-    expect(() => geminiAtStartup({})).toThrow("GEMINI_API_KEY is not set; Diagnose, Repair, and the Challenger need it.");
+    expect(() => geminiAtStartup({ REPRO_GEMINI_AUTH: "api-key" })).toThrow("GEMINI_API_KEY is not set; Diagnose, Repair, and the Challenger need it.");
+  });
+
+  it("turns the model stages off when no Gemini auth is configured at all", () => {
+    expect(geminiAtStartup({})).toEqual({ auth: "none" });
+    expect(geminiStartupLine({ auth: "none" })).toContain("runs stop after reproduction");
   });
 
   it("refuses an unknown REPRO_GEMINI_AUTH instead of guessing", () => {
