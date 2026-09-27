@@ -11,6 +11,7 @@ import {
   type Workspace,
 } from "../contracts.js";
 import { isRepairEligible } from "../diagnose/diagnose.js";
+import { readFilesForPrompt } from "../file-context.js";
 import type { GeminiClient, InputItem } from "../gemini.js";
 import { Sandbox, defaultReproductionJudge, formatExec, type ReproductionJudge } from "../sandbox.js";
 import { WorkspaceFiles } from "../workspace-files.js";
@@ -90,6 +91,7 @@ export async function repair(input: RepairInput, deps: RepairDeps): Promise<Repa
     diagnosis,
     findings: cited,
     fileIndex: input.workspace.fileIndex,
+    preloaded: await readFilesForPrompt(files, cited.map((finding) => finding.file)),
     maxToolCalls,
     testCommand,
     feedback: input.feedback,
