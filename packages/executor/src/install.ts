@@ -21,8 +21,10 @@ import {
 // This is the one sandboxed step that gets any network, and only in two narrow halves:
 // - download: `npm ci --ignore-scripts` / `pip download --only-binary=:all:` in a container on an
 //   internal Docker network whose only way out is repro-registry-proxy, which tunnels to the npm
-//   and PyPI registries and nothing else. No target-controlled code runs in this half: npm install
-//   scripts are skipped and pip only takes prebuilt wheels.
+//   and PyPI registries and nothing else. npm install scripts are skipped and pip takes only prebuilt
+//   wheels from the index, but this half isn't free of target code: a requirements line naming a
+//   local directory (`./pkg`) makes pip run that package's build backend to read its metadata. That
+//   code can reach only the registries, and the container holds nothing but the workspace itself.
 // - build: `npm rebuild` (the install scripts) and the venv install from the downloaded wheels,
 //   through the ordinary Executor, with no network at all.
 //
