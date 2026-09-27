@@ -66,6 +66,7 @@ describe("processRun", () => {
       "counter-test",
       "stage",
       "stage",
+      "gemini-requests",
       "completed",
     ]);
     expect(logs.find((l) => (l.entry as { event?: string }).event === "detected")?.entry).toMatchObject({

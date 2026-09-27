@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const orchestrator = new Orchestrator({
     store,
     executor,
-    gemini: (log) => createGeminiClient({ log }),
+    gemini: (log, budget) => createGeminiClient({ log, budget }),
     pullRequests: octokit ? new GitHubPullRequests(octokit, executor) : undefined,
     keepWorkspace: process.env.REPRO_KEEP_WORKSPACES === "1",
     say,

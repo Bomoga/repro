@@ -1,4 +1,5 @@
 import {
+  RequestBudget,
   diagnose,
   isDailyQuotaExhausted,
   isRepairEligible,
@@ -32,8 +33,9 @@ export interface PipelineDeps {
   store: RunStore;
   /** The sandbox every command that touches target-repo code runs in (section 9). */
   executor: Executor;
-  /** A Gemini client that records every interaction to the log it's given: the Run's own. */
-  gemini: (log: InteractionLog) => GeminiClient;
+  /** A Gemini client that records every interaction to the log it's given and charges every request
+   *  to the budget it's given: both the Run's own. */
+  gemini: (log: InteractionLog, budget: RequestBudget) => GeminiClient;
   /** Every enabled detector. Defaults to Lane 2's. */
   detectors?: DetectorAdapter[];
   /** Opens a PR for each verified Patch; without one, verified Patches wait in the Run Store. */
@@ -59,6 +61,13 @@ export async function processRun(claimed: Run, deps: PipelineDeps): Promise<Run>
   const runId = claimed.id;
   const log = new RunLog(store, runId);
   const say = (line: string) => deps.say?.(`[${runId}] ${line}`);
+  const budget = new RequestBudget();
+  const logRequests = () => {
+    const byModel = budget.requestsByModel();
+    log.event("gemini-requests", { byModel, proRequests: budget.proRequests, ...(budget.limit !== undefined ? { proLimit: budget.limit } : {}) });
+    const counts = Object.entries(byModel).map(([model, count]) => `${model} ${count}`);
+    if (counts.length > 0) say(`gemini requests: ${counts.join(", ")}${budget.limit !== undefined ? ` (Pro-tier ${budget.proRequests} of ${budget.limit})` : ""}`);
+  };
 
   let stage = claimed.stage;
   const enter = async (next: Exclude<Run["stage"], "done">) => {
@@ -91,7 +100,7 @@ export async function processRun(claimed: Run, deps: PipelineDeps): Promise<Run>
 
     if (findings.length > 0) {
       await enter("diagnose");
-      const gemini = deps.gemini(log.interactions);
+      const gemini = deps.gemini(log.interactions, budget);
       const diagnosed = await stages.diagnose({ findings, workspace }, { gemini });
       await store.addDiagnoses(runId, diagnosed.diagnoses);
       const eligible = diagnosed.diagnoses.filter((diagnosis) => isRepairEligible(diagnosis, findings));
@@ -161,10 +170,12 @@ export async function processRun(claimed: Run, deps: PipelineDeps): Promise<Run>
     }
 
     const done = await store.updateRun(runId, { stage: "done", status: "completed" });
+    logRequests();
     log.event("completed");
     say("completed");
     return done;
   } catch (error) {
+    logRequests();
     log.event("failed", { stage, message: messageOf(error) });
     say(`failed in ${stage}: ${messageOf(error)}`);
     return store.updateRun(runId, { status: "failed" }).catch(async () => (await store.getRun(runId)) ?? { ...claimed, stage, status: "failed" });
