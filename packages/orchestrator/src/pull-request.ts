@@ -135,8 +135,11 @@ function cited(input: Pick<PullRequestInput, "diagnosis" | "findings">): Finding
 }
 
 /** A rule's short name. Registry rules end in it ("...sqli.node-postgres-sqli"); Lane 2's own
- *  privacy rules end in their language ("privacy.prompt-logging.js"). */
+ *  privacy rules name it right after their prefix, then maybe a provider, then their language
+ *  ("privacy.prompt-logging.js", "privacy.oauth-broad-scope.google.js"). */
 function ruleName(ruleId: string): string {
+  const privacy = /^privacy\.([^.]+)/.exec(ruleId);
+  if (privacy) return privacy[1]!;
   return ruleId.replace(/\.(js|jsx|ts|tsx|py)$/, "").split(/[./]/).pop() || ruleId;
 }
 

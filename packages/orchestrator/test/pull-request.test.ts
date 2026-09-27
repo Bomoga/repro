@@ -35,6 +35,11 @@ describe("pullRequestTitle and pullRequestBody", () => {
     expect(pullRequestTitle(input({ findings: [privacy], patch: aPatch("patch_2", "diag_sqli", { filesChanged: ["src/assistant.js"] }) }))).toBe(
       "Repro: fix prompt-logging in src/assistant.js",
     );
+    // A provider-specific privacy rule is still named by its rule, not its provider.
+    const oauth = aFinding("fnd_sqli", { detectorId: "privacy-patterns", ruleId: "privacy.oauth-broad-scope.google.js", file: "src/integrations/drive.js" });
+    expect(pullRequestTitle(input({ findings: [oauth], patch: aPatch("patch_3", "diag_sqli", { filesChanged: ["src/integrations/drive.js"] }) }))).toBe(
+      "Repro: fix oauth-broad-scope in src/integrations/drive.js",
+    );
   });
 
   it("labels the narration as Gemini's and pastes the proof verbatim", () => {
