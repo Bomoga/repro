@@ -3,3 +3,8 @@ import subprocess
 
 def ping(host):
     return subprocess.call("ping -c 1 " + host, shell=True)
+
+
+def queue(job, pending=[]):
+    pending.append(job)
+    return pending

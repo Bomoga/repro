@@ -3,6 +3,7 @@ import { DockerExecutor, type InstallReport, installDependencies } from "@repro/
 import { gitleaksAdapter } from "./adapters/gitleaks.ts";
 import { osvAdapter } from "./adapters/osv.ts";
 import { privacyPatternsAdapter } from "./adapters/privacy-patterns.ts";
+import { ruffAdapter } from "./adapters/ruff.ts";
 import { semgrepAdapter } from "./adapters/semgrep.ts";
 import { testsAdapter } from "./adapters/tests.ts";
 
@@ -38,7 +39,7 @@ export function installFor(exec: Executor): ((workspace: Workspace) => Promise<I
 }
 
 export function defaultAdapters(): DetectorAdapter[] {
-  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter, osvAdapter, testsAdapter];
+  return [semgrepAdapter, gitleaksAdapter, privacyPatternsAdapter, osvAdapter, ruffAdapter, testsAdapter];
 }
 
 // The Deterministic Detection Engine: runs every enabled adapter, nothing else. No model calls,

@@ -45,6 +45,7 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
     expect(byDetector("semgrep")).toBe(4);
     expect(byDetector("gitleaks")).toBe(1);
     expect(byDetector("privacy-patterns")).toBe(7);
+    expect(findings.filter((f) => f.detectorId === "ruff").map((f) => `${f.ruleId}@${f.lineStart}`).sort()).toEqual(["B006@8", "S602@5"]);
     // Advisory counts depend on the image's OSV snapshot, so pin the two seeded ones, not a total.
     expect(findings.filter((f) => f.detectorId === "osv-scanner").map((f) => `${f.file}:${f.ruleId}`)).toEqual(
       expect.arrayContaining(["package-lock.json:GHSA-xvch-5gv4-984h", "requirements.txt:GHSA-8q59-q68h-6hv4"]),
@@ -77,6 +78,20 @@ describe.skipIf(!ready)("lane 2 end to end (sandbox)", () => {
     writeFileSync(file, before.replace("PyYAML==5.3.1", "PyYAML==5.4"));
     try {
       const after = await exec.exec({ workspacePath: workspace.path, command: pyyaml.reproductionCommand!, timeoutMs: 120_000 });
+      expect(after.exitCode).toBe(0);
+      expect(after.stdout).toContain("NOT REPRODUCED");
+    } finally {
+      writeFileSync(file, before);
+    }
+  }, 120_000);
+
+  it("reports ruff's mutable-default bug fixed once the default is gone", async () => {
+    const b006 = findings.find((f) => f.ruleId === "B006")!;
+    const file = join(workspace.path, b006.file);
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file, before.replace("def queue(job, pending=[]):\n    pending.append(job)", "def queue(job, pending=None):\n    pending = [] if pending is None else pending\n    pending.append(job)"));
+    try {
+      const after = await exec.exec({ workspacePath: workspace.path, command: b006.reproductionCommand!, timeoutMs: 120_000 });
       expect(after.exitCode).toBe(0);
       expect(after.stdout).toContain("NOT REPRODUCED");
     } finally {

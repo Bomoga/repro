@@ -1,6 +1,7 @@
 export * from "./adapters/gitleaks.ts";
 export * from "./adapters/osv.ts";
 export * from "./adapters/privacy-patterns.ts";
+export * from "./adapters/ruff.ts";
 export * from "./adapters/semgrep.ts";
 export * from "./adapters/tests.ts";
 export * from "./engine.ts";
