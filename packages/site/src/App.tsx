@@ -5,6 +5,7 @@ import { Home } from "./pages/Home.tsx";
 import { Download } from "./pages/Download.tsx";
 import { Docs } from "./pages/Docs.tsx";
 import { Pricing } from "./pages/Pricing.tsx";
+import { Results } from "./pages/Results.tsx";
 import { Faq } from "./pages/Faq.tsx";
 import { Credits } from "./pages/Credits.tsx";
 
@@ -102,6 +103,7 @@ export function App() {
         {page === "home" && <Home go={go} />}
         {page === "download" && <Download />}
         {page === "docs" && <Docs />}
+        {page === "results" && <Results />}
         {page === "pricing" && <Pricing go={go} />}
         {page === "faq" && <Faq />}
         {page === "credits" && <Credits />}

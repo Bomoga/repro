@@ -795,3 +795,18 @@ a.card__cta:hover {
   height: 100%;
   object-fit: cover;
 }
+
+.res__lede { max-width: 60ch; color: var(--ink2); }
+.res__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; margin-bottom: 24px; }
+.res__stat { display: flex; flex-direction: column; gap: 4px; padding: 18px; }
+.res__num { font-size: 56px; line-height: 1; }
+.res__label { font-size: 20px; }
+.res__sub { font-size: 17px; color: var(--mute); }
+.res__row { align-items: flex-start; }
+.res__how { display: block; font-size: 16px; color: var(--mute); }
+.res__bar { display: flex; height: 22px; margin: 14px 16px; border: 1px solid var(--line); }
+.res__seg { border-right: 1px solid var(--bg); }
+.res__seg[data-role="repair"] { background: var(--ink); }
+.res__seg[data-role="challenger"] { background: var(--amber); }
+.res__seg[data-role="diagnose"] { background: var(--green); }
+.res__note { margin: 24px 0 0; color: var(--mute); max-width: 80ch; font-size: 17px; }
