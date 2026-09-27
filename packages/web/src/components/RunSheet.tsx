@@ -344,7 +344,7 @@ export function RunSheet({
                 </span>
               </div>
 
-              <StageTimeline run={data.run} size="lg" />
+              <StageTimeline run={data.run} size="lg" modelStagesSkipped={data.findings.length > 0 && data.diagnoses.length === 0} />
 
               <Sieve steps={sieveSteps(data.findings, data.diagnoses, data.patches)} settled={settled} />
 

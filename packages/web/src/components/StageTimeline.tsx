@@ -5,10 +5,14 @@ type StationState = "done" | "active" | "waiting" | "pending" | "blocked" | "fai
 
 const GLYPH: Record<StationState, string> = { done: "✓", active: "●", waiting: "…", pending: "", blocked: "!", failed: "✕" };
 
-export function stationStates(run: Pick<Run, "stage" | "status">): StationState[] {
+/**
+ * `modelStagesSkipped`: the run completed with findings but no diagnoses, because it ran without
+ * Gemini. Diagnose, Repair and Verify then show as not run instead of ticked.
+ */
+export function stationStates(run: Pick<Run, "stage" | "status">, modelStagesSkipped = false): StationState[] {
   const at = run.stage === "done" ? STAGES.length : STAGES.indexOf(run.stage);
   return STAGES.map((_, i) => {
-    if (run.status === "completed") return "done";
+    if (run.status === "completed") return modelStagesSkipped && i >= 2 ? "pending" : "done";
     if (run.status === "queued") return i === 0 ? "waiting" : "pending";
     if (i < at) return "done";
     if (i > at) return "pending";
@@ -27,8 +31,8 @@ function connector(from: StationState, to: StationState | undefined): string {
  * Ingest → Detect → Diagnose → Repair → Verify as square stations. `lg` in the run sheet, `md` in
  * the in-flight window, `sm` (no glyphs or labels) in the runs list.
  */
-export function StageTimeline({ run, size }: { run: Pick<Run, "stage" | "status">; size: "lg" | "md" | "sm" }) {
-  const states = stationStates(run);
+export function StageTimeline({ run, size, modelStagesSkipped }: { run: Pick<Run, "stage" | "status">; size: "lg" | "md" | "sm"; modelStagesSkipped?: boolean }) {
+  const states = stationStates(run, modelStagesSkipped);
   const labelled = size !== "sm";
   return (
     <div role="list" aria-label="Stage timeline" className="tl" data-size={size}>

@@ -27,7 +27,7 @@ describe("ruff adapter", () => {
   });
 
   it("runs isolated from the target's own config and noqa comments", async () => {
-    expect(RUFF_SCAN_COMMAND).toContain("--select S,B --ignore S101");
+    expect(RUFF_SCAN_COMMAND).toContain("--select S,B --ignore S101,S603,S607");
     expect(RUFF_SCAN_COMMAND).toContain("--isolated");
     expect(RUFF_SCAN_COMMAND).toContain("--ignore-noqa");
     const exec = new FakeExecutor(() => ({ stdout: fixture("ruff.json") }));

@@ -1,0 +1,89 @@
+#!/bin/sh
+# Repro installer: curl -fsSL repro.miami/install | sh
+#
+# Clones Repro into ~/.repro/app, installs its dependencies, builds the Docker sandbox every
+# target command runs in, and puts a `repro` command in ~/.local/bin. Run it again to update.
+#
+#   REPRO_HOME           where Repro lives (default ~/.repro/app)
+#   REPRO_BIN_DIR        where the `repro` command goes (default ~/.local/bin)
+#   REPRO_REF            the branch or tag to install (default main)
+#   REPRO_SKIP_SANDBOX=1 skip building the sandbox image (scans need it; `repro sandbox` builds it later)
+set -eu
+
+REPO="https://github.com/Bomoga/repro.git"
+REPRO_HOME="${REPRO_HOME:-$HOME/.repro/app}"
+BIN_DIR="${REPRO_BIN_DIR:-$HOME/.local/bin}"
+REF="${REPRO_REF:-main}"
+
+say() { printf '\033[1mrepro\033[0m %s\n' "$*"; }
+fail() { printf '\033[31mrepro: %s\033[0m\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is required: $2"; }
+
+need git "install it from https://git-scm.com"
+need node "install Node.js 20.6 or newer from https://nodejs.org"
+need npm "it ships with Node.js"
+
+node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>20||(a===20&&b>=6)?0:1)' \
+  || fail "Node.js 20.6 or newer is required (found $(node --version))"
+
+if [ -d "$REPRO_HOME/.git" ]; then
+  say "updating $REPRO_HOME"
+  git -C "$REPRO_HOME" fetch --quiet --depth 1 origin "$REF"
+  git -C "$REPRO_HOME" checkout --quiet -B "$REF" FETCH_HEAD
+else
+  say "cloning Repro into $REPRO_HOME"
+  mkdir -p "$(dirname "$REPRO_HOME")"
+  git clone --quiet --depth 1 --branch "$REF" "$REPO" "$REPRO_HOME"
+fi
+
+say "installing dependencies (a minute or two)"
+(cd "$REPRO_HOME" && npm ci --no-audit --no-fund --loglevel=error >/dev/null)
+
+if [ "${REPRO_SKIP_SANDBOX:-0}" != "1" ]; then
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    say "building the sandbox image (first time: a few minutes)"
+    (cd "$REPRO_HOME" && docker build --quiet -t repro-sandbox:dev sandbox >/dev/null)
+  else
+    say "Docker isn't running: skipping the sandbox. Start Docker, then run: repro sandbox"
+  fi
+fi
+
+mkdir -p "$BIN_DIR"
+cat > "$BIN_DIR/repro" <<EOF
+#!/bin/sh
+# Installed by repro.miami/install
+REPRO_HOME="$REPRO_HOME"
+case "\${1:-}" in
+  up|start) cd "\$REPRO_HOME" && exec npm run --silent demo ;;
+  demo) cd "\$REPRO_HOME" && exec npm run --silent dev:all ;;
+  sandbox) cd "\$REPRO_HOME" && exec docker build -t repro-sandbox:dev sandbox ;;
+  update) exec sh -c "curl -fsSL https://repro.miami/install | sh" ;;
+  --version|version) printf 'repro %s\n' "\$(node -p "require('\$REPRO_HOME/package.json').version")" ;;
+  ""|help|--help|-h)
+    cat <<'HELP'
+repro up                 start Repro: control plane, dashboard (http://localhost:5173), site
+repro demo               the dashboard over demo runs, no Docker or Gemini needed
+repro scan <target>      queue a scan (owner/repo or /absolute/path) on a running control plane
+repro status             list runs;  repro watch, repro report, repro patch: see --help
+repro sandbox            (re)build the Docker sandbox image
+repro update             update to the latest Repro
+HELP
+    ;;
+  *) exec node "\$REPRO_HOME/packages/cli/bin/repro.js" "\$@" ;;
+esac
+EOF
+chmod +x "$BIN_DIR/repro"
+
+say "installed: $("$BIN_DIR/repro" --version)"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) say "add $BIN_DIR to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+esac
+cat <<EOF
+
+  Next:
+    repro up            start Repro, then open http://localhost:5173
+                        (sign in with Google there, or put GEMINI_API_KEY in $REPRO_HOME/.env)
+    repro demo          just look around, with demo data
+
+EOF

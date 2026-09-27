@@ -1,6 +1,6 @@
 // Every word on the site, copied from the design handoff (Repro Site.dc.html).
 
-export const INSTALL_COMMAND = "curl -fsSL repro.sh/install | sh";
+export const INSTALL_COMMAND = "curl -fsSL repro.miami/install | sh";
 
 export const DASHBOARD_URL = (import.meta.env.VITE_DASHBOARD_URL ?? "http://localhost:5173").replace(/\/$/, "");
 export const GITHUB_URL = import.meta.env.VITE_GITHUB_URL ?? "https://github.com/Bomoga/repro";
@@ -45,7 +45,7 @@ export const DOWNLOADS: DownloadOption[] = [
     tag: "recommended",
     name: "curl script",
     desc: "One line. Installs the CLI to ~/.repro/bin.",
-    code: "$ curl -fsSL repro.sh/install | sh\n$ repro --version\nrepro 0.9.2",
+    code: "$ curl -fsSL repro.miami/install | sh\n$ repro --version\nrepro 0.1.0",
     cta: "Copy install command",
     action: "copy",
     meta: "sha256 9f2c…e41a · signed",
@@ -89,7 +89,7 @@ export const DOC_NAV = [
 ];
 
 export const DOC_STEPS = [
-  { id: "install", n: "01", t: "Install", p: "Grab the CLI. Make sure Docker is running.", code: "$ curl -fsSL repro.sh/install | sh" },
+  { id: "install", n: "01", t: "Install", p: "Grab the CLI. Make sure Docker is running.", code: "$ curl -fsSL repro.miami/install | sh" },
   {
     id: "scan",
     n: "02",
@@ -151,10 +151,9 @@ export const FAQ: [string, string][] = [
 ];
 
 export const TEAM = [
-  { n: "01", handle: "@alex.ingest", name: "Alex Moreno", role: "Pipeline + sandbox" },
-  { n: "02", handle: "@priya.detect", name: "Priya Nair", role: "Scanners + reproduction" },
-  { n: "03", handle: "@sam.verify", name: "Sam Okafor", role: "Repair + challenger" },
-  { n: "04", handle: "@jules.ui", name: "Jules Brandt", role: "Interface + reports" },
+  { n: "01", handle: "@AlexanderGese", photo: "/team/alexander-gese.jpg", name: "Alexander Gese", role: "Orchestrator, run store + dashboard" },
+  { n: "02", handle: "@brandondelgadoo", photo: "/team/brandon-delgado.jpg", name: "Brandon Delgado", role: "Scanners + sandbox reproduction" },
+  { n: "03", handle: "@Bomoga", photo: "/team/adrian-morton.jpg", name: "Adrian Morton", role: "Diagnosis, repair + challenger" },
 ];
 
 export const OSS = [
