@@ -1,0 +1,13 @@
+diff --git a/src/integrations/drive.js b/src/integrations/drive.js
+index 1e6c532..f552a9c 100644
+--- a/src/integrations/drive.js
++++ b/src/integrations/drive.js
+@@ -4,7 +4,7 @@
+ const GOOGLE_OAUTH = {
+   clientId: 'notewise-demo.apps.googleusercontent.example',
+   redirectUri: 'http://localhost:3000/auth/google/callback',
+-  scopes: ['https://www.googleapis.com/auth/drive'],
++  scopes: ['https://www.googleapis.com/auth/drive.file'],
+ };
+ 
+ function consentUrl(state) {
