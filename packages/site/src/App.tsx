@@ -110,7 +110,7 @@ export function App() {
       </main>
 
       <footer className="ftr">
-        <span>Repro · MIT</span>
+        <span>Repro · v0.1.0</span>
         <a href={SAMPLE_REPORT_URL}>Sample report</a>
         <a href={GITHUB_URL}>GitHub</a>
         <span className="ftr__made">Made at ShellHacks 2026</span>
