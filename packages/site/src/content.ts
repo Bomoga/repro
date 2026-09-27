@@ -164,8 +164,8 @@ export const FAQ: [string, string][] = [
 
 export const TEAM = [
   { n: "01", handle: "@AlexanderGese", photo: "/team/alexander-gese.jpg", name: "Alexander Gese" },
-  { n: "02", handle: "@brandondelgadoo", photo: "/team/brandon-delgado.jpg", name: "Brandon Delgado" },
-  { n: "03", handle: "@Bomoga", photo: "/team/adrian-morton.jpg", name: "Adrian Morton" },
+  { n: "02", handle: "@Bomoga", photo: "/team/adrian-morton.jpg", name: "Adrian Morton" },
+  { n: "03", handle: "@brandondelgadoo", photo: "/team/brandon-delgado.jpg", name: "Brandon Delgado" },
 ];
 
 export const OSS = [
