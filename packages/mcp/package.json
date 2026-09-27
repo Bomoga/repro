@@ -1,0 +1,14 @@
+{
+  "name": "@repro/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "repro-mcp": "src/server.ts" },
+  "scripts": {
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "tsx": "^4.23.15"
+  }
+}
