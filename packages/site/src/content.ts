@@ -31,55 +31,66 @@ export const PAGE_TITLE: Record<Page, string> = {
   credits: "Repro credits",
 };
 
-export interface DownloadOption {
+export const VERSION = "0.1.0";
+export const RELEASE_URL = `${GITHUB_URL}/releases/tag/v${VERSION}`;
+const asset = (file: string) => `${GITHUB_URL}/releases/download/v${VERSION}/${file}`;
+
+export type Os = "linux" | "mac" | "windows";
+
+export interface ReleaseFile {
+  label: string;
   file: string;
-  tag: string;
-  name: string;
-  desc: string;
-  code: string;
-  cta: string;
-  action: "copy" | "none" | "github";
-  meta: string;
+  size: string;
+  href: string;
 }
 
-export const DOWNLOADS: DownloadOption[] = [
-  {
-    file: "install.sh",
-    tag: "recommended",
-    name: "curl script",
-    desc: "One line. Installs the CLI to ~/.repro/bin.",
-    code: "$ curl -fsSL repro.miami/install | sh\n$ repro --version\nrepro 0.1.0",
-    cta: "Copy install command",
-    action: "copy",
-    meta: "sha256 9f2c…e41a · signed",
+export interface Platform {
+  os: Os;
+  name: string;
+  /** What the recommended path installs, in one line. */
+  pitch: string;
+  primary: ReleaseFile;
+  also: ReleaseFile[];
+  /** Shown under the buttons: how to run it once downloaded. */
+  steps: string;
+}
+
+const file = (label: string, name: string, size: string): ReleaseFile => ({ label, file: name, size, href: asset(name) });
+
+export const PLATFORMS: Record<Os, Platform> = {
+  linux: {
+    os: "linux",
+    name: "Linux",
+    pitch: "The Repro desktop app and the repro command. Repro shows up in your app menu.",
+    primary: file("Download .deb", `repro_${VERSION}_amd64.deb`, "37 MB"),
+    also: [file(".rpm", `repro-${VERSION}-1.x86_64.rpm`, "30 MB"), file("CLI x64 .tar.gz", `repro-${VERSION}-linux-x64.tar.gz`, "37 MB"), file("CLI arm64", `repro-${VERSION}-linux-arm64`, "81 MB")],
+    steps: `$ sudo apt install ./repro_${VERSION}_amd64.deb\n$ repro app        # or open Repro from the app menu`,
   },
-  {
-    file: "Repro-0.9.2.dmg",
-    tag: "macOS 13+",
-    name: "macOS app",
-    desc: "The live run view as a native app. CLI included.",
-    code: "Apple Silicon · 48 MB\nIntel · 51 MB",
-    cta: "Download .dmg ↓",
-    action: "none",
-    meta: "notarized · sha256 3b71…0cd2",
+  mac: {
+    os: "mac",
+    name: "macOS",
+    pitch: "The install command puts Repro.app in ~/Applications and the repro command on your PATH.",
+    primary: file("CLI · Apple Silicon", `repro-${VERSION}-macos-arm64.tar.gz`, "26 MB"),
+    also: [file("CLI · Intel", `repro-${VERSION}-macos-x64.tar.gz`, "29 MB")],
+    steps: "$ tar xzf repro-*-macos-*.tar.gz\n$ xattr -d com.apple.quarantine repro   # unsigned build\n$ ./repro status",
   },
-  {
-    file: "README.md",
-    tag: "source",
-    name: "Build from source",
-    desc: "Node 20 and Docker. Takes about two minutes.",
-    code: "$ git clone github.com/repro-sh/repro\n$ cd repro && npm ci\n$ npm run build && npm link",
-    cta: "Open on GitHub ↗",
-    action: "github",
-    meta: "MIT licensed",
+  windows: {
+    os: "windows",
+    name: "Windows",
+    pitch: "The repro command for Windows. For the full desktop app, run the install command in WSL.",
+    primary: file("Download .exe", `repro-${VERSION}-windows-x64.exe`, "86 MB"),
+    also: [file(".zip", `repro-${VERSION}-windows-x64.zip`, "40 MB")],
+    steps: "> set REPRO_API_URL=http://localhost:4000\n> repro-0.1.0-windows-x64.exe status",
   },
-];
+};
+
+export const CHECKSUMS = { label: "SHA256SUMS", file: "SHA256SUMS", size: "1 KB", href: asset("SHA256SUMS") };
 
 export const REQUIREMENTS = [
-  { k: "OS", v: "macOS 13+ · Linux" },
+  { k: "OS", v: "Linux · macOS · Windows (WSL)" },
   { k: "Sandbox", v: "Docker 24+" },
-  { k: "Runtime", v: "Node 20+" },
-  { k: "Model", v: "your API key" },
+  { k: "Runtime", v: "Node 20.6+ · git" },
+  { k: "Model", v: "Google sign-in or your API key" },
 ];
 
 export const DOC_NAV = [

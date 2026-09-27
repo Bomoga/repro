@@ -6,7 +6,7 @@ export function Pricing({ go }: { go: (page: Page) => void }) {
       <div className="pricing__pitch">
         <span className="eyebrow">pricing</span>
         <h1 className="pricing__price">$0.</h1>
-        <p className="pricing__lede">Free forever. Open source under MIT. No account, no seats, no telemetry.</p>
+        <p className="pricing__lede">Free forever. Source on GitHub. No account, no seats, no telemetry.</p>
         <div className="pricing__actions">
           <button type="button" className="btn-solid btn-solid--sm" onClick={() => go("download")}>
             Download ↓

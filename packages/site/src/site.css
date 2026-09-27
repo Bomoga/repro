@@ -812,3 +812,24 @@ a.card__cta:hover {
 .res__seg[data-role="challenger"] { background: var(--amber); }
 .res__seg[data-role="diagnose"] { background: var(--green); }
 .res__note { margin: 24px 0 0; color: var(--mute); max-width: 80ch; font-size: 17px; }
+
+/* -------------------------------------------------------------------------------- Download */
+
+.dl { display: flex; flex-direction: column; gap: 24px; }
+.dl > .intro { margin-bottom: 8px; }
+.dl__os { display: flex; gap: 28px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.dl__tab {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0 8px; margin-bottom: -1px;
+  border: 0; border-bottom: 3px solid transparent; background: none; color: var(--ink2);
+  font: 30px "VT323", monospace; cursor: pointer;
+}
+.dl__tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.dl__tab:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.dl__you { font-size: 17px; color: var(--amber); }
+.dl__size { opacity: 0.65; font-size: 20px; margin-left: 6px; }
+.dl__also { display: flex; flex-wrap: wrap; gap: 8px; }
+.dl__alt { font-size: 21px; padding: 4px 10px; }
+.dl__row { color: inherit; text-decoration: none; }
+.dl__row:hover { background: var(--ev); }
+.dl__src { padding: 0 16px 14px; }
