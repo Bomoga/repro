@@ -4,7 +4,7 @@
  * every interaction to the run log. Everything else talks to the `GeminiClient` interface,
  * which is also what unit tests mock.
  */
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GoogleGenAIOptions } from "@google/genai";
 import * as z from "zod";
 
 export type GeminiRole = "diagnose" | "challenger" | "repair" | "narrator";
@@ -195,6 +195,9 @@ export interface RetryPolicy {
 
 const DEFAULT_RETRY: RetryPolicy = { maxAttempts: 4, baseDelayMs: 2_000, maxDelayMs: 60_000 };
 
+/** What the wrapper builds the SDK with: GoogleGenAI's own constructor options. */
+export type GeminiSdkOptions = GoogleGenAIOptions;
+
 /** The slice of the SDK this wrapper uses; tests inject a fake. */
 export interface InteractionsSdk {
   interactions: {
@@ -222,7 +225,10 @@ export interface GeminiClientOptions {
   /** Charged for every request this client sends; requests to the Pro-tier roles' models count against its cap. */
   budget?: RequestBudget;
   env?: NodeJS.ProcessEnv;
+  /** Used as it is: nothing gets built, so no auth setting applies. */
   sdk?: InteractionsSdk;
+  /** Builds the SDK from the options the wrapper picks (default: a real GoogleGenAI); tests inject one to see them. */
+  createSdk?: (options: GeminiSdkOptions) => InteractionsSdk;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
@@ -252,18 +258,7 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
     if (!sdk) {
       const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
       if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
-      const client = new GoogleGenAI({ apiKey });
-      sdk = {
-        interactions: {
-          create: (params, requestOptions) =>
-            client.interactions.create(
-              params as unknown as Parameters<typeof client.interactions.create>[0],
-              requestOptions,
-            ),
-          get: (id, params, requestOptions) => client.interactions.get(id, params, requestOptions),
-          cancel: (id) => client.interactions.cancel(id),
-        },
-      };
+      sdk = (options.createSdk ?? buildSdk)({ apiKey });
     }
     return sdk;
   };
@@ -337,6 +332,19 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
         if (!failure.retryable || attempt >= policy.maxAttempts) throw failure;
         await sleep(backoffMs(attempt, failure.message, policy));
       }
+    },
+  };
+}
+
+/** A real GoogleGenAI client, narrowed to the interactions this wrapper uses. */
+function buildSdk(sdkOptions: GeminiSdkOptions): InteractionsSdk {
+  const client = new GoogleGenAI(sdkOptions);
+  return {
+    interactions: {
+      create: (params, requestOptions) =>
+        client.interactions.create(params as unknown as Parameters<typeof client.interactions.create>[0], requestOptions),
+      get: (id, params, requestOptions) => client.interactions.get(id, params, requestOptions),
+      cancel: (id) => client.interactions.cancel(id),
     },
   };
 }

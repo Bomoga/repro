@@ -10,6 +10,7 @@ import {
   modelFor,
   parseStructured,
   toGeminiSchema,
+  type GeminiSdkOptions,
   type InteractionsSdk,
 } from "../src/gemini.js";
 
@@ -41,6 +42,16 @@ function fakeSdk(...outcomes: (unknown | Error)[]) {
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
+}
+
+/** A `createSdk` that hands back `fake`'s SDK and records the options each build was given. */
+function sdkBuilder(fake = fakeSdk(completed)) {
+  const built: GeminiSdkOptions[] = [];
+  const createSdk = vi.fn((options: GeminiSdkOptions) => {
+    built.push(options);
+    return fake.sdk;
+  });
+  return { ...fake, built, createSdk };
 }
 
 const completed = {
@@ -257,6 +268,21 @@ describe("createGeminiClient", () => {
       }),
     ).rejects.toMatchObject({ status: 500 });
     expect(flaky.calls).toHaveLength(3);
+  });
+
+  it("builds the SDK once, from the API key alone, and not at all without one", async () => {
+    const { built, createSdk, calls } = sdkBuilder(fakeSdk(completed, completed));
+    const client = createGeminiClient({ createSdk, env: { GEMINI_API_KEY: "test-key" } });
+    await client.interact({ role: "repair", systemInstruction: "s", input: "i" });
+    await client.interact({ role: "diagnose", systemInstruction: "s", input: "i" });
+    expect(built).toStrictEqual([{ apiKey: "test-key" }]);
+    expect(calls).toHaveLength(2);
+
+    const unbuilt = sdkBuilder();
+    await expect(
+      createGeminiClient({ createSdk: unbuilt.createSdk, env: {} }).interact({ role: "repair", systemInstruction: "s", input: "i" }),
+    ).rejects.toMatchObject({ message: "GEMINI_API_KEY is not set", retryable: false });
+    expect(unbuilt.createSdk).not.toHaveBeenCalled();
   });
 });
 
