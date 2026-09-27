@@ -5,11 +5,14 @@ import {
   MemoryInteractionLog,
   RequestBudget,
   createGeminiClient,
+  geminiAuthFromEnv,
+  googleSignIn,
   isBudgetExhausted,
   isDailyQuotaExhausted,
   modelFor,
   parseStructured,
   toGeminiSchema,
+  type GeminiRole,
   type GeminiSdkOptions,
   type InteractionsSdk,
 } from "../src/gemini.js";
@@ -343,6 +346,107 @@ describe("the request budget", () => {
     expect(budget.requestsByModel()).toEqual({ "gemini-3.1-pro-preview": 3 });
     expect(() => new RequestBudget(0)).toThrow(/positive integer/);
     expect(() => new RequestBudget(2.5)).toThrow(/positive integer/);
+  });
+});
+
+describe("Google sign-in (REPRO_GEMINI_AUTH=google)", () => {
+  const SIGN_IN = { REPRO_GEMINI_AUTH: "google", REPRO_GEMINI_QUOTA_PROJECT: "repro-demo-123" };
+  const SIGNED_IN_SDK = {
+    vertexai: false,
+    googleAuthOptions: {
+      scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/generative-language.retriever"],
+    },
+    httpOptions: { headers: { "x-goog-user-project": "repro-demo-123" } },
+  };
+  const ask = (role: GeminiRole = "diagnose") => ({ role, systemInstruction: "s", input: "i" });
+
+  it("builds the SDK with no key, Google's scopes, the Gemini Developer API, and the quota project", async () => {
+    const { built, createSdk, calls } = sdkBuilder();
+    await createGeminiClient({ createSdk, env: SIGN_IN }).interact(ask());
+    expect(built).toStrictEqual([SIGNED_IN_SDK]);
+    expect(calls).toHaveLength(1);
+
+    // The same from options alone.
+    const fromOptions = sdkBuilder();
+    await createGeminiClient({ createSdk: fromOptions.createSdk, auth: "google", quotaProject: " repro-demo-123 ", env: {} }).interact(ask());
+    expect(fromOptions.built).toStrictEqual([SIGNED_IN_SDK]);
+  });
+
+  it.each([
+    ["unset", {}],
+    ["blank", { REPRO_GEMINI_AUTH: " " }],
+    ["api-key", { REPRO_GEMINI_AUTH: "api-key" }],
+  ])("leaves api-key mode as it was with REPRO_GEMINI_AUTH %s", async (_, auth) => {
+    const { built, createSdk } = sdkBuilder();
+    const env = { ...auth, GEMINI_API_KEY: "test-key", REPRO_GEMINI_QUOTA_PROJECT: "repro-demo-123" };
+    await createGeminiClient({ createSdk, env }).interact(ask());
+    expect(JSON.stringify(built)).toBe('[{"apiKey":"test-key"}]');
+  });
+
+  it("polls and cancels through the SDK it built for the sign-in", async () => {
+    const fake = fakeSdk({ id: "int-bg", status: "in_progress", steps: [] }, { id: "int-slow", status: "in_progress", steps: [] });
+    fake.polls.push({ id: "int-bg", status: "queued", steps: [] }, completed);
+    const { built, createSdk, sdk, cancelled } = sdkBuilder(fake);
+    const background = { createSdk, env: SIGN_IN, transport: "background" as const, sleep: async () => {} };
+    await expect(createGeminiClient(background).interact(ask())).resolves.toMatchObject({ status: "completed" });
+    await expect(createGeminiClient({ ...background, timeoutMs: -1, retry: { maxAttempts: 1 } }).interact(ask())).rejects.toMatchObject({
+      message: expect.stringContaining("did not finish"),
+    });
+    expect(sdk.interactions.get).toHaveBeenCalledTimes(2);
+    expect(cancelled).toEqual(["int-slow"]);
+    // No other SDK was built, so the polls and the cancel went out with the sign-in too.
+    expect(built).toStrictEqual([SIGNED_IN_SDK, SIGNED_IN_SDK]);
+  });
+
+  const GEMINI_KEY = "AIzaSyFAKE-gemini-key-0000000000000000000";
+  const GOOGLE_KEY = "AIzaSyFAKE-google-key-0000000000000000000";
+
+  it.each([
+    [{ GEMINI_API_KEY: GEMINI_KEY }, "GEMINI_API_KEY is set too"],
+    [{ GOOGLE_API_KEY: GOOGLE_KEY }, "GOOGLE_API_KEY is set too"],
+    [{ GEMINI_API_KEY: GEMINI_KEY, GOOGLE_API_KEY: GOOGLE_KEY }, "GEMINI_API_KEY and GOOGLE_API_KEY are set too"],
+  ])("refuses to sign in while an API key is set, since the SDK would send the key instead (%j)", async (keys, says) => {
+    const { createSdk } = sdkBuilder();
+    const log = new MemoryInteractionLog();
+    const sleep = vi.fn(async () => {});
+    const failure = await createGeminiClient({ createSdk, log, sleep, env: { ...SIGN_IN, ...keys } })
+      .interact(ask())
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ name: "GeminiError", retryable: false, message: expect.stringContaining(says) });
+    expect(createSdk).not.toHaveBeenCalled();
+    expect(sleep).not.toHaveBeenCalled();
+    expect(log.entries.map((entry) => entry.error?.message)).toEqual([(failure as Error).message]);
+    expect(JSON.stringify([String(failure), log.entries])).not.toMatch(/AIzaSyFAKE/);
+  });
+
+  it.each([
+    [{ REPRO_GEMINI_AUTH: "google" }, "needs REPRO_GEMINI_QUOTA_PROJECT"],
+    [{ ...SIGN_IN, REPRO_GEMINI_QUOTA_PROJECT: "My Project" }, "must be a Google Cloud project ID"],
+    [{ ...SIGN_IN, GOOGLE_GENAI_DEBUG: "1" }, "GOOGLE_GENAI_DEBUG is set"],
+    [{ ...SIGN_IN, REPRO_GEMINI_AUTH: "googel" }, 'REPRO_GEMINI_AUTH must be "api-key" or "google", got "googel"'],
+  ])("refuses settings it can't sign in with (%j)", async (env, says) => {
+    const { createSdk } = sdkBuilder();
+    await expect(createGeminiClient({ createSdk, env, sleep: async () => {} }).interact(ask())).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining(says),
+    });
+    expect(createSdk).not.toHaveBeenCalled();
+  });
+
+  it("refuses an apiKey option alongside the sign-in", async () => {
+    const { createSdk } = sdkBuilder();
+    await expect(
+      createGeminiClient({ createSdk, auth: "google", apiKey: GEMINI_KEY, quotaProject: "repro-demo-123", env: {} }).interact(ask()),
+    ).rejects.toMatchObject({ retryable: false, message: "the apiKey option can't be combined with Google sign-in" });
+    expect(createSdk).not.toHaveBeenCalled();
+  });
+
+  it("takes project IDs, domain-scoped ones, and project numbers, and never echoes a pasted credential", () => {
+    for (const project of ["repro-demo-123", "example.com:repro-demo", "123456789012"]) {
+      expect(googleSignIn({ REPRO_GEMINI_QUOTA_PROJECT: ` ${project} ` })).toEqual({ quotaProject: project });
+    }
+    expect(() => geminiAuthFromEnv({ REPRO_GEMINI_AUTH: GEMINI_KEY })).toThrow(/^REPRO_GEMINI_AUTH must be "api-key" or "google"$/);
+    expect(geminiAuthFromEnv({})).toBe("api-key");
   });
 });
 

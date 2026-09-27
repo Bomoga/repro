@@ -215,8 +215,87 @@ export interface InteractionsSdk {
  */
 export type GeminiTransport = "request" | "background";
 
+/**
+ * How requests authenticate, always to the Gemini Developer API, where the Interactions API lives
+ * (never Vertex AI). Set via REPRO_GEMINI_AUTH. "api-key" (default): GEMINI_API_KEY. "google":
+ * the operator's Google sign-in, the Application Default Credentials that
+ * `gcloud auth application-default login` writes (or the file GOOGLE_APPLICATION_CREDENTIALS
+ * names), which the SDK trades for short-lived OAuth tokens. Every request then names
+ * REPRO_GEMINI_QUOTA_PROJECT in x-goog-user-project, so that project's quota and billing apply,
+ * whatever quota project the credentials file names.
+ */
+export type GeminiAuth = "api-key" | "google";
+
+/** The scopes Google's Gemini OAuth guide signs in with. The SDK insists on cloud-platform among them. */
+export const GOOGLE_SIGN_IN_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/generative-language.retriever",
+] as const;
+
+// Built without a key, the SDK takes one from these when either is set, whatever else it's given.
+const API_KEY_VARIABLES = ["GEMINI_API_KEY", "GOOGLE_API_KEY"] as const;
+// A Google Cloud project ID, domain-scoped ones included, or a project number.
+const PROJECT = /^(?:[a-z0-9.-]+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$|^\d+$/;
+
+/** The auth REPRO_GEMINI_AUTH names: "api-key" when it's unset or blank, and an error for anything else it doesn't know. */
+export function geminiAuthFromEnv(env: NodeJS.ProcessEnv = process.env): GeminiAuth {
+  const raw = env.REPRO_GEMINI_AUTH?.trim();
+  if (!raw) return "api-key";
+  if (raw === "api-key" || raw === "google") return raw;
+  // Echoed only when it looks like a mistyped mode, not like something pasted into the wrong variable.
+  const got = /^[a-z-]{1,20}$/i.test(raw) ? `, got "${raw}"` : "";
+  throw new GeminiError(`REPRO_GEMINI_AUTH must be "api-key" or "google"${got}`, undefined, false);
+}
+
+/**
+ * Google sign-in's settings, checked the same way by the wrapper before it builds the SDK and by
+ * the control plane at startup: a non-retryable GeminiError for anything that would make the
+ * sign-in fail, or quietly lose to an API key.
+ */
+export function googleSignIn(
+  env: NodeJS.ProcessEnv = process.env,
+  quotaProject = env.REPRO_GEMINI_QUOTA_PROJECT,
+): { quotaProject: string } {
+  refuseSignInConflicts(env);
+  const project = quotaProject?.trim();
+  if (!project) {
+    throw new GeminiError(
+      "REPRO_GEMINI_AUTH=google needs REPRO_GEMINI_QUOTA_PROJECT, the ID of the Google Cloud project its requests are billed to",
+      undefined,
+      false,
+    );
+  }
+  if (!PROJECT.test(project)) {
+    throw new GeminiError("REPRO_GEMINI_QUOTA_PROJECT must be a Google Cloud project ID (like repro-demo-123) or number", undefined, false);
+  }
+  return { quotaProject: project };
+}
+
+/** Throws when the environment would undo Google sign-in: a key the SDK would send instead, or the SDK's debug output, which prints the access token. */
+function refuseSignInConflicts(env: NodeJS.ProcessEnv): void {
+  const keys = API_KEY_VARIABLES.filter((name) => env[name]?.trim());
+  if (keys.length > 0) {
+    throw new GeminiError(
+      `REPRO_GEMINI_AUTH=google, but ${keys.join(" and ")} ${keys.length > 1 ? "are" : "is"} set too, and the Gemini SDK would send that key instead of the Google sign-in: remove it from the environment and .env, or unset REPRO_GEMINI_AUTH to keep using the key`,
+      undefined,
+      false,
+    );
+  }
+  if (env.GOOGLE_GENAI_DEBUG) {
+    throw new GeminiError(
+      "REPRO_GEMINI_AUTH=google, but GOOGLE_GENAI_DEBUG is set, and it makes the Gemini SDK print every request's headers, the access token among them: unset it",
+      undefined,
+      false,
+    );
+  }
+}
+
 export interface GeminiClientOptions {
   apiKey?: string;
+  /** How requests authenticate; REPRO_GEMINI_AUTH when unset. */
+  auth?: GeminiAuth;
+  /** Google sign-in only: the project requests are billed to; REPRO_GEMINI_QUOTA_PROJECT when unset. */
+  quotaProject?: string;
   log?: InteractionLog;
   retry?: Partial<RetryPolicy>;
   /** Deadline for one interaction to finish. High thinking can take minutes. */
@@ -256,9 +335,16 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
 
   const getSdk = (): InteractionsSdk => {
     if (!sdk) {
-      const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
-      if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
-      sdk = (options.createSdk ?? buildSdk)({ apiKey });
+      const build = options.createSdk ?? buildSdk;
+      if ((options.auth ?? geminiAuthFromEnv(env)) === "google") {
+        if (options.apiKey !== undefined) throw new GeminiError("the apiKey option can't be combined with Google sign-in", undefined, false);
+        const { quotaProject } = googleSignIn(env, options.quotaProject);
+        sdk = build(googleSignInSdkOptions(quotaProject));
+      } else {
+        const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
+        if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set", undefined, false);
+        sdk = build({ apiKey });
+      }
     }
     return sdk;
   };
@@ -336,9 +422,32 @@ export function createGeminiClient(options: GeminiClientOptions = {}): GeminiCli
   };
 }
 
+/**
+ * The SDK options for Google sign-in: no key, so the SDK signs in with Application Default
+ * Credentials under Google's scopes; the Gemini Developer API even if GOOGLE_GENAI_USE_VERTEXAI
+ * says otherwise; and the quota project on every request, polls and cancels included.
+ */
+function googleSignInSdkOptions(quotaProject: string): GeminiSdkOptions {
+  return {
+    vertexai: false,
+    googleAuthOptions: { scopes: [...GOOGLE_SIGN_IN_SCOPES] },
+    httpOptions: { headers: { "x-goog-user-project": quotaProject } },
+  };
+}
+
+const NO_KEY_WARNING = "API key should be set when using the Gemini API.";
+
 /** A real GoogleGenAI client, narrowed to the interactions this wrapper uses. */
 function buildSdk(sdkOptions: GeminiSdkOptions): InteractionsSdk {
-  const client = new GoogleGenAI(sdkOptions);
+  let client: GoogleGenAI;
+  if (sdkOptions.apiKey === undefined) {
+    // Signing in. The SDK reads a key from process.env whatever env this client was given, and it
+    // warns that a key should be set, which under sign-in is the point: that one line is dropped.
+    refuseSignInConflicts(process.env);
+    client = withoutWarning(NO_KEY_WARNING, () => new GoogleGenAI(sdkOptions));
+  } else {
+    client = new GoogleGenAI(sdkOptions);
+  }
   return {
     interactions: {
       create: (params, requestOptions) =>
@@ -347,6 +456,19 @@ function buildSdk(sdkOptions: GeminiSdkOptions): InteractionsSdk {
       cancel: (id) => client.interactions.cancel(id),
     },
   };
+}
+
+/** Runs `build` with console.warn dropping `warning` and nothing else; `build` is synchronous, so no other code runs meanwhile. */
+function withoutWarning<T>(warning: string, build: () => T): T {
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (args[0] !== warning) warn.apply(console, args);
+  };
+  try {
+    return build();
+  } finally {
+    console.warn = warn;
+  }
 }
 
 function statusOf(raw: unknown): string {
