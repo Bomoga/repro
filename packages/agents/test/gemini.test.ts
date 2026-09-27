@@ -4,6 +4,7 @@ import {
   GeminiError,
   MemoryInteractionLog,
   createGeminiClient,
+  isDailyQuotaExhausted,
   modelFor,
   parseStructured,
   toGeminiSchema,
@@ -206,12 +207,12 @@ describe("createGeminiClient", () => {
     const { sdk } = fakeSdk(httpError(429, "Rate limit exceeded (limit: 0 requests per day on Free Tier)"));
     const sleep = vi.fn(async () => {});
     const client = createGeminiClient({ sdk, env: {}, sleep });
-    await expect(client.interact({ role: "diagnose", systemInstruction: "s", input: "i" })).rejects.toMatchObject({
-      name: "GeminiError",
-      status: 429,
-      retryable: false,
-    });
+    const failure = await client.interact({ role: "diagnose", systemInstruction: "s", input: "i" }).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ name: "GeminiError", status: 429, retryable: false });
+    expect(isDailyQuotaExhausted(failure)).toBe(true);
     expect(sleep).not.toHaveBeenCalled();
+    // A per-minute 429 is worth waiting out, so it isn't a spent daily quota.
+    expect(isDailyQuotaExhausted(new GeminiError("Resource exhausted, please retry in 1.5s", 429, true))).toBe(false);
   });
 
   it("reads the API's own message out of the error body to spot a per-day quota", async () => {

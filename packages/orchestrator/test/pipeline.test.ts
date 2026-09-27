@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { GeminiError } from "@repro/agents";
 import { processRun } from "../src/pipeline.ts";
 import type { PullRequestInput } from "../src/pull-request.ts";
 import { aDiagnosis, disputedThenVerified, harness } from "./helpers.ts";
@@ -136,6 +137,17 @@ describe("processRun", () => {
       throw new Error("Docker is not running");
     });
     expect(await processRun(await all.queue(), all.deps)).toMatchObject({ stage: "repair", status: "failed" });
+
+    // A spent daily quota ends the run at once: diag_b never starts.
+    const quota = twoRepairable();
+    quota.deps.stages.repairAndVerify = vi.fn(async () => {
+      throw new GeminiError("Rate limit exceeded for model gemini-3.1-pro (limit: 250 requests per day on Tier 1).", 429, false);
+    });
+    const quotaRun = await quota.queue();
+    expect(await processRun(quotaRun, quota.deps)).toMatchObject({ stage: "repair", status: "failed" });
+    expect(quota.deps.stages.repairAndVerify).toHaveBeenCalledTimes(1);
+    const failed = (await quota.store.listLogs(quotaRun.id)).find((log) => (log.entry as { event?: string }).event === "failed");
+    expect(failed?.entry).toMatchObject({ stage: "repair", message: expect.stringContaining("250 requests per day") });
   });
 
   it("opens a PR for each verified patch and records its URL; a PR that fails doesn't fail the run", async () => {

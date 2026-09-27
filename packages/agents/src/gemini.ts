@@ -123,6 +123,13 @@ export class GeminiError extends Error {
   }
 }
 
+const PER_DAY_QUOTA = /per day/i;
+
+/** A per-day quota ran out (a 429 naming a daily limit): nothing recovers it until the quota resets. */
+export function isDailyQuotaExhausted(error: unknown): error is GeminiError {
+  return error instanceof GeminiError && error.status === 429 && PER_DAY_QUOTA.test(error.message);
+}
+
 export interface RetryPolicy {
   maxAttempts: number;
   baseDelayMs: number;
@@ -373,7 +380,7 @@ function classify(error: unknown): GeminiError {
   if (status === 429) {
     // A per-day quota (including a limit of zero on the free tier) won't recover inside any
     // backoff window; fail fast so the caller can switch models instead of waiting.
-    return new GeminiError(message, status, !/per day/i.test(message));
+    return new GeminiError(message, status, !PER_DAY_QUOTA.test(message));
   }
   if (status !== undefined) return new GeminiError(message, status, status >= 500);
   const cause = (e.cause ?? {}) as { code?: unknown; message?: unknown };

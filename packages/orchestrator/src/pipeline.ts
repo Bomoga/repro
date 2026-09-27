@@ -1,5 +1,6 @@
 import {
   diagnose,
+  isDailyQuotaExhausted,
   isRepairEligible,
   repairAndVerify,
   type CounterTestRun,
@@ -133,6 +134,9 @@ export async function processRun(claimed: Run, deps: PipelineDeps): Promise<Run>
           );
           if (result.patch.status === "verified") verified.push({ patch: result.patch, diagnosis });
         } catch (error) {
+          // A spent daily Gemini quota won't come back within this Run: every later diagnosis would
+          // spend its Repair calls and then fail the same way, so the Run stops here instead.
+          if (isDailyQuotaExhausted(error)) throw error;
           repairFailures.push(messageOf(error));
           log.event("repair-failed", { diagnosisId: diagnosis.id, message: messageOf(error) });
           say(`    repair failed: ${messageOf(error)}`);
