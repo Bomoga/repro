@@ -25,6 +25,7 @@ One line per session: what was done, what's next.
 - **The PR step and its merge sync haven't met real GitHub:** both are tested against fakes only. Trying them needs a GitHub-hosted demo repo, a `REPRO_GITHUB_TOKEN` scoped to it (contents and pull requests, write), and for the webhook, a tunnel to the API. The dashboard's own Merge button still marks a Patch merged without touching its PR.
 - **Demo target:** Lane 2's real rules catch only the prompt logging in Lane 3's `demo-target`; the SQL injection (generic `db.query`, not `pg`) and the `sk-demo-…` key (gitleaks skips it) go undetected. The team's demo repo needs issues the real detectors catch, plus a test suite (no suite means nothing can be verified).
 - **Windows:** Lane 2's `repo-adapter.test.ts` symlink test fails on Windows (`C:/etc/hosts`), so the root `npm test` is red on this machine; reported in the PR #4 review.
+
 ## Contracts (approved 2026-09-26: section 4 as written)
 
 - `Executor` is `exec(request)`, as in Lane 2's package; Lane 3 uses it.
