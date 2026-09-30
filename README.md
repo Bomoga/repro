@@ -5,7 +5,7 @@
 
 # Repro
 
-**Proof, not promises.** Repro points AI agents at a codebase, grounds every finding in evidence you can re-run, and repairs the code with proof that the fix actually holds, not just a plausible-looking diff.
+**Proof, not promises.** Repro points AI agents at a codebase, grounds every finding in evidence you can re-run, and repairs the code with proof that the fix actually holds, not just a plausible-looking diff. It does this without burning tokens: models only ever see what a deterministic scan has already confirmed.
 
 Repro was built in 36 hours for a hackathon.
 
@@ -13,9 +13,12 @@ Repro was built in 36 hours for a hackathon.
 
 Scanners flag hundreds of lines, and most of them aren't real. AI coding tools will happily "fix" what they're told to, and return a diff that looks right. Neither one tells you whether the problem existed, or whether it's gone.
 
-Repro holds itself to two rules:
+There's a second cost, and it's the one that hits your bill. The usual way to point an AI agent at a repo is to hand it the code and ask it to find problems. The model reads far more than it needs to, reasons about issues that turn out to be noise, and spends tokens on fixes nobody can verify. Then a person spends more time checking whether any of it was real. Every wasted token is paid for twice, once in model spend and once in review time.
+
+Repro is built to solve both problems at once, with two rules:
 
 - **Grounded truth before reasoning.** A finding isn't a finding until it has been reproduced: its reproduction command runs in a sandbox and the output shows the problem. A model can explain a finding and prioritize it, but it can never invent one.
+- **Tokens go only where evidence exists.** Detection makes no model calls at all: scanners find candidates and a sandbox reproduces them. Gemini never scans the repo. Diagnose receives only reproduced findings plus the code each one points to, and groups findings that share a root cause so they're diagnosed once. Repair and the Challenger run only on findings that survived reproduction, and both are capped in tool calls and attempts. A per-Run request budget can stop the model spend early. Noise is filtered out for free, before any model is paid to think about it.
 - **Proof-carrying repair.** A patch is done only when the original finding no longer reproduces, the project's own tests still pass, and a second, adversarial agent has tried to break the fix and failed. Then a person reads the proof and decides whether to merge.
 
 ## How it works
@@ -44,6 +47,7 @@ A control plane sits behind all of this. The CLI and the web dashboard queue Run
 ## What makes it different
 
 - **Detection is deterministic.** Semgrep (the registry rules plus Repro's own privacy rules), gitleaks, osv-scanner, Ruff, and the project's own test suite. No model ever decides what counts as a finding.
+- **Token-efficient by design.** The expensive part, model reasoning, is spent on a short list of confirmed findings, not on a whole codebase or a scanner's raw output. Findings that share a root cause are diagnosed together, each repair attempt has a hard cap, and an optional request budget bounds what one Run can spend.
 - **Findings are reproduced, not just reported.** The noise a scanner produces collapses to what the sandbox actually confirmed. The reproduction output travels with the finding as its "before".
 - **Gemini proposes, the sandbox disposes.** Every model output that matters is checked by something deterministic: a schema, `git diff`, the test suite, a detector re-run, a counter-test.
 - **An adversarial pass before any PR.** The Challenger runs on a different model from Repair, never sees Repair's reasoning, and attacks with code, not opinions.
