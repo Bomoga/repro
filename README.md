@@ -2,6 +2,8 @@
 
 **Proof, not promises.** Repro points AI agents at a codebase, grounds every finding in evidence you can re-run, and repairs the code with proof that the fix actually holds, not just a plausible-looking diff.
 
+🏆 **First Place, Microsoft Sponsor Challenge — ShellHacks X**
+
 Repro was built in 36 hours for a hackathon.
 
 ## The problem
