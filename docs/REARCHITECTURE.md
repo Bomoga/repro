@@ -81,7 +81,7 @@ Picked for a production tool maintained by three engineers: prefer mature librar
 
 | Area | Decision | Why |
 |---|---|---|
-| Database | **Postgres 16, managed** (any provider), PITR backups on, `DATABASE_URL`; PGlite only for desktop and tests | Real durability and ops tooling; one SQL dialect everywhere |
+| Database | **Cloud SQL for PostgreSQL 16** (managed, PITR backups on, private IP, `DATABASE_URL`); PGlite only for desktop and tests | Real durability and ops tooling; one SQL dialect everywhere |
 | Data access | **Drizzle ORM + drizzle-kit migrations**; Zod contracts validate every read and write | Typed SQL close to the metal; contracts stay the source of truth |
 | Migrations in deploy | Run as an explicit step under `pg_advisory_lock`, forward-only, each reviewed by Alex; app refuses to start on a schema version mismatch | No migration races between workers |
 | Job queue | **pg-boss** behind a `JobQueue` interface (retries, expiry, dead-letter, singleton keys, heartbeat), plus an in-process implementation for desktop and tests | Three engineers shouldn't own a queue. `pr` is enqueued by the planner when its `repair` completes, so no dependency graph is needed |
@@ -95,7 +95,7 @@ Picked for a production tool maintained by three engineers: prefer mature librar
 | Model resilience | Per-role **fallback chain** (e.g. local, then cloud), circuit breaker after repeated failures, per-profile rate limit and budget | A quota stop on stage was the top demo risk; production needs the general fix |
 | Local model flavors | `openai-compatible` and a native `ollama` adapter | Ollama's OpenAI-compat endpoint may not honor per-request context size; verify against the version we target |
 | Statefulness across providers | Client-side transcript emulation for stateless providers | Keeps `repair.ts` and `challenger.ts` unchanged |
-| Deployment | **Single Linux VM** running one `docker compose` reference stack (API, workers, Ollama optional) against managed Postgres; multi-host workers and Kubernetes **deferred to backlog task B10** (`Workspace.path` is sandbox-local by contract; the sandbox needs a Docker daemon) | Honest scope for three people |
+| Deployment | **Google Cloud, single Compute Engine VM** running one `docker compose` reference stack (API, workers, Ollama optional) against Cloud SQL, with the sandbox image in Artifact Registry and secrets in Secret Manager; multi-host workers and Kubernetes **deferred to backlog task B10** (`Workspace.path` is sandbox-local by contract; the sandbox needs a Docker daemon) | Honest scope for three people |
 | CI/CD | GitHub Actions on Linux with Docker; required checks: typecheck, unit, conformance (Postgres service), contract-diff guard, sandbox image build, dependency audit; signed desktop releases | A green baseline everyone can see |
 | Secrets | Env or secret manager only; config names the env var; settings and audit tables have no secret columns, enforced by a test | Section 9 |
 
@@ -122,7 +122,7 @@ Sizes: S under a day of agent time, M a day or two, L several days. Relative, no
 | **P0 Baseline** | Everyone starts green | B1 (Linux CI, Windows test fixes), C1 (RunStore seam), A1 (models extraction). All three are independent |
 | **P1 Foundations** | Build behind flags | A2, A3, C2, C3, B2, B3, A7 (auth), C7 (tables for auth and audit) |
 | **P2 Core** | The new paths | A4, A5, A6, C4, C5, B4 (after A1), B6, A8 |
-| **P3 Integrate** | Flip defaults | C6 (cutover), A9, A10, B7, B8, C8, C9, C10 |
+| **P3 Integrate** | Flip defaults | C6 (cutover), A9, A10, A13, B7, B8, C8, C9, C10 |
 | **P4 Polish sprint** | Fan-out backlog | Section 8 |
 | **P5 Remove and ship** | Delete old paths, production gates | Section 9 |
 
@@ -156,6 +156,7 @@ Done when: existing agent tests pass with import-only edits.
 4. Fallback chain and circuit breaker: a role's client tries the primary, then each fallback on non-retryable provider failure or an open breaker; every switch is logged with the reason. A fallback that sends code off the machine when the primary was local requires an explicit `allowEgress: true` on that role (default false), so a local-only user is never silently sent to a cloud.
 5. Presets: `gemini-default` (today's table), `local-qwen`, `hybrid`.
 6. Warnings, not errors: challenger and repair on the same model (independence); `contextWindow` too small; repair role without tool support.
+7. **Google credentials.** Today's Gemini sign-in is a user login (7-day expiry while the OAuth consent screen is in Testing). Adrian is moving this to a permanent credential plan; A2 must not assume either mode. First verify whether a service account (ADC on the Compute Engine VM) can call the Gemini Developer API's Interactions endpoint, since the code deliberately avoids Vertex AI, and pick the mode from the result.
 Tests: env-only legacy setups resolve exactly to today's `modelFor` outputs; a fallback-with-egress test.
 
 **A3 OpenAI-compatible and Ollama providers (L).**
@@ -224,6 +225,18 @@ Tests: mutation without credentials is 401, `viewer` cannot decide a patch, `htt
 - Mask credentials and refuse `GOOGLE_GENAI_DEBUG` in api-key mode too (reproduced).
 - Several tool calls per turn (repair loop), gated by `capabilities.parallelTools`.
 - Prompt updates that teach the Challenger to write hold-out counter-tests (pairs with B6) and the insecure-fallback rule (pairs with B6).
+
+**A13 Hardware check and dynamic local-model sizing (M).** Depends on A3 (Ollama adapter) and B8 (bench smoke suite). Local Qwen sizes are **decided by a hardware check, not configured by hand.**
+1. **Probe** (`HardwareProfile`): OS, CPU cores, system RAM, free disk, and accelerators: NVIDIA via `nvidia-smi` (name, total and free VRAM), AMD via `rocm-smi`, Apple Silicon via `sysctl` (unified memory; the usable share is capped, since macOS limits GPU-wired memory). No GPU means CPU-only, with RAM as the budget. Also detect the runtime: whether Ollama (or a configured OpenAI-compatible server) is reachable, its version, installed models (`/api/tags`), and what is loaded (`/api/ps`).
+2. **Catalog as data, not code:** `packages/models/catalog/qwen.json` lists each Qwen family and size with parameters, quantization options and their file sizes, native context length, and capability flags (tools, thinking). Updating the catalog needs no code change.
+3. **Fit calculation:** required memory = weights at the chosen quantization + KV cache for the target `contextWindow` + a fixed runtime overhead. A candidate fits if it needs at most ~80% of available VRAM (or ~60% of free RAM for CPU-only, which also lowers the concurrency default). Choose the largest fitting size per role, preferring the coder variant for repair and a smaller, faster model for the narrator; shrink the context window before dropping a size, but never below what the role needs (A4's minimums).
+4. **Concurrency:** derived from leftover memory, default 1; 2 only with clear headroom. This feeds A5's `ModelGate` `maxConcurrency`.
+5. **Fit decides what can run; the bench decides what is good.** After picking, run B8's smoke subset (one tool-call round trip, one schema round trip, a short repair task) and record tokens per second and pass or fail. Downgrade one size if throughput is below the configured floor (a repair attempt must finish within its wall-clock cap) or the smoke suite fails. "Recommended" flags still come only from measured bench scores, never from the fit calculation.
+6. **When it runs:** first use, on `repro models doctor`, when the runtime's model list changes, and when the stored hardware fingerprint changes. The result is stored in `settings` and shown in Settings → Models and the desktop first-run flow (C9, C12); the user can always override, with a warning if the override doesn't fit.
+7. **Remote runtimes:** a provider whose `baseUrl` is not loopback can't be probed for hardware. Use the runtime's own reported models, and require a user-supplied VRAM figure (or skip sizing and use the configured model as is).
+8. **Privacy:** the hardware profile stays local. It is never sent to a model, a log sink, or telemetry, and is redacted from exported run logs.
+9. **Surface:** `repro models doctor` (CLI), a `models.hardware` tRPC query (viewer role), and a hardware card in the UI.
+Tests: fixture outputs for `nvidia-smi`, `rocm-smi`, `sysctl`, and Ollama `/api/tags` and `/api/ps` across at least six machines (24 GB GPU, 8 GB GPU, no GPU, Apple 16 GB and 64 GB, low-RAM laptop); a table test that the fit calculation picks the expected size and never exceeds the memory cap; a test that a failing smoke run downgrades exactly one size.
 
 ### Lane 2: Deterministic engine (Brandon)
 
@@ -330,7 +343,7 @@ Rollback until P5: `REPRO_STORE=mongo`.
 GitHub Actions: typecheck, unit, conformance against a Postgres service and PGlite, the contract-diff guard (fails if `packages/contracts/**` changes without an approved label), sandbox image build and vulnerability scan, `npm audit` gate, Renovate config. Desktop builds signed on tags. Brandon's B1 job slots in as the Linux test job.
 
 **C9 Settings → Models UI (L).** Depends on A10.
-1. Per-role provider and model dropdowns filled by discovery, preset buttons, a Test button, fallback ordering, a "code leaves this machine" badge from `dataLeavesMachine`, and A2's warnings inline.
+1. A hardware card from A13 (detected GPU and RAM, which sizes fit, the recommended size per role) and per-role provider and model dropdowns filled by discovery, preset buttons, a Test button, fallback ordering, a "code leaves this machine" badge from `dataLeavesMachine`, and A2's warnings inline.
 2. The no-chat rule holds: these are configuration inputs, not prompt boxes. The base-URL field is the one free-text input, a reviewed exception with A7's guard behind it.
 3. Admin-only, with an audit entry on save.
 
@@ -344,7 +357,7 @@ GitHub Actions: typecheck, unit, conformance against a Postgres service and PGli
 Run view lists provider and model per role from `run_configs`; the Trust Report notes "analyzed locally, code did not leave this machine" when every role's profile has `dataLeavesMachine=false`. `buildReport()` stays pure; its store reads become SQL aggregates with provider, model, latency, and token dimensions. Cost per verified fix uses a price table for cloud profiles; local profiles report time and tokens with cost "not measured", as the report's honesty rule requires.
 
 **C12 Desktop and local packaging (M).**
-PGlite by default, Ollama auto-detect on first run, a first-run flow using C9's Settings, loopback-only auth mode, signed installers, and site docs for local models.
+PGlite by default, Ollama auto-detect and A13's hardware check on first run (sizes chosen automatically, overridable), a first-run flow using C9's Settings, loopback-only auth mode, signed installers, and site docs for local models.
 
 **C13 Claims and docs cleanup (S).**
 Remove Assurant, MongoDB Atlas, and Gemini-prize framing from `README.md`, `DEMO.md`, `packages/site/src/content.ts`, and the site pages. Keep the Microsoft claim and the demo script's framing (a person accomplishing a real task, merge as the human act). Replace `mongo.md` and `ENVIRONMENT.md`'s Atlas section with Postgres, local model setup, and auth setup.
@@ -370,7 +383,7 @@ Each engineer supervises their own lane's agents through Dispatch. Inside a lane
 | 2 (P1) | A2, A7 | B2, B3 | C2, C7-schema, C13 |
 | 3 (P1-P2) | A3, A5 | B4 (after A1), B5 | C3, C5 |
 | 4 (P2) | A4, A6 | B6, B7 | C4, C8 |
-| 5 (P3) | A8, A10, A9 | B8, B9 | C6, C9, C10 |
+| 5 (P3) | A8, A10, A9, A13 (after B8's smoke suite) | B8, B9 | C6, C9, C10 |
 | 6 (P4) | A11, A12 | B5 leftovers, B6 leftovers | C7, C11, C12 |
 
 **Running: parallel repair inside Repro.** The unit is one Diagnosis's repair-and-verify (attempts and the Challenger retry edge stay inside one job). It is bounded, in order, by per-profile `ModelGate` concurrency, the Postgres-backed budget, and the Executor's `maxConcurrent`. Defaults: cloud profiles 4, local profiles 1. Overlapping loci run sequentially. One repair failing rejects its Patch and logs; only budget or quota exhaustion stops sibling scheduling.
@@ -419,5 +432,6 @@ The rearchitecture is not done until all of these hold:
 1. ~~DVBD reading~~ Confirmed: DVBD is the deterministic engine (section 5).
 2. ~~Anthropic provider~~ Not scheduled: there is no Anthropic access yet. The provider interface supports adding one later without a redesign. Gemini's Google sign-in (`auth: "google"`) stays a first-class auth mode in A2's config.
 3. ~~Multi-host and Kubernetes~~ Decided: start on a single VM; B10 holds the Kubernetes executor in the backlog until the team grows or a listed trigger fires.
-4. Which Qwen sizes the team's hardware can run; B8's recommendations depend on measured results on that hardware.
-5. Hosting target for the reference deployment (only affects C7's runbook and C8's deploy job).
+4. ~~Qwen sizes~~ Decided: sized dynamically by a hardware check (A13), not hand-configured.
+5. ~~Hosting target~~ Decided: Google Cloud with Cloud SQL (Compute Engine VM, Cloud SQL for PostgreSQL, Artifact Registry, Secret Manager). C7's runbook and C8's deploy job target it; gVisor (`runsc`) is installed on the VM for B2.
+6. Google credential mode: Adrian is moving from the current user login to a permanent plan; A2 verifies service-account access first (step 7).
