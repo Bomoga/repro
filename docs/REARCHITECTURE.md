@@ -109,7 +109,7 @@ Assumption to confirm: **DVBD** is read as the deterministic engine, meaning ing
 | **Lane 2: Deterministic engine** | `lane-2` | Brandon | `@repro/ingest`, `@repro/detect`, `@repro/executor`, new `@repro/verify`, `sandbox/`, the bench harness |
 | **Lane 3: Data and frontend** | `lane-3` | Alex | `@repro/store` (Postgres), migrations, `@repro/web`, `@repro/site`, `@repro/desktop`, run report and analytics, CI and release pipeline |
 
-Etiquette is unchanged: one branch per lane, `lane-N:` commit prefix, sub-branches `lane-N/<topic>`, merge `main` in never rebase, hourly cadence, autonomous merge only when the change touches nothing in `@repro/contracts`. `@repro/contracts` is frozen and owned jointly; any change there needs Dispatch confirmation from all three. Old `lane-4*` and `lane-5*` remote branches are retired: Adrian confirms each is merged, then deletes it (a human action; nothing is deleted by an agent).
+Etiquette is unchanged except for the branch model: `main` (deployable) receives only from `dev` (integration), which receives from `lane-1`..`lane-3`, which receive from `lane-N/<topic>` sub-branches. Lanes merge to `dev` autonomously when build and tests pass and nothing in `@repro/contracts` changed; `dev` to `main` needs another engineer's approval. `lane-N:` commit prefix, merge `dev` in never rebase, hourly cadence. See CLAUDE.md section 6. `@repro/contracts` is frozen and owned jointly; any change there needs Dispatch confirmation from all three. Old `lane-4*` and `lane-5*` remote branches are retired: Adrian confirms each is merged, then deletes it (a human action; nothing is deleted by an agent).
 
 **Cross-lane interfaces (the only things lanes share):** `RunStore` (Alex builds, everyone consumes), `ModelClient` (Adrian builds, `@repro/verify` and bench consume), `Executor` (Brandon builds, everyone consumes), `JobQueue` (Adrian builds on Alex's Postgres), and the frozen contracts.
 
@@ -125,6 +125,8 @@ Sizes: S under a day of agent time, M a day or two, L several days. Relative, no
 | **P3 Integrate** | Flip defaults | C6 (cutover), A9, A10, A13, B7, B8, C8, C9, C10 |
 | **P4 Polish sprint** | Fan-out backlog | Section 8 |
 | **P5 Remove and ship** | Delete old paths, production gates | Section 9 |
+
+Promotion to `main` happens at the end of each wave (P0 baseline, P1, and so on) and once at each P3 cutover flip after it has soaked on `dev`.
 
 Hard edges: **A1 before B4** (both restructure `packages/agents`). C1 before A6 and everything that imports the store. C4 before the desktop path. C2/C3 before C6. A5 before A8. B3 before A8. A7 and C7 agree on auth table shapes before either builds (30-minute contract review, then independent).
 
@@ -371,7 +373,7 @@ Each engineer supervises their own lane's agents through Dispatch. Inside a lane
 3. **Reproduce first.** Every polish or repair task starts with a failing test on `main` (section 2's rule). No failing test, no change; a defect that no longer reproduces is closed with a note.
 4. **Definition of done per agent:** test red before and green after; package tests green; `tsc` clean; one commit per logical change with the `lane-N:` prefix; sub-branch pushed.
 5. **Adversarial review before merge.** A second agent with a different prompt (`/code-review`) tries to break each diff, seeing the diff and test output but not the author's transcript, mirroring the Challenger.
-6. **Integrator merges** sub-branches into the lane branch (merge, never rebase), runs the full suite, pushes. With contracts untouched, the lane merges to `main` on its own per commit conduct.
+6. **Integrator merges** sub-branches into the lane branch (merge, never rebase), runs the full suite, pushes. With contracts untouched, the lane merges to `dev` on its own through a PR per commit conduct; `dev` to `main` waits for a human approval, at the end of each wave.
 7. **Caps.** Three to four concurrent agents per engineer. Sonnet-class for mechanical polish; Opus-class for A3, A4, A6, A7, A8, B2, B4, C3.
 8. **Stop and flag in Dispatch** on: any edit to `packages/contracts`; a `main` merge that doesn't resolve cleanly; a push that would overwrite another session's work; an agent stuck on the same failing test after two attempts.
 
