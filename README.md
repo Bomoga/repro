@@ -1,8 +1,11 @@
+<h1 align="center">🏆 First Place: Microsoft Sponsor Challenge 🏆</h1>
+<h3 align="center">ShellHacks X Winner</h3>
+
+---
+
 # Repro
 
 **Proof, not promises.** Repro points AI agents at a codebase, grounds every finding in evidence you can re-run, and repairs the code with proof that the fix actually holds, not just a plausible-looking diff.
-
-🏆 **First Place, Microsoft Sponsor Challenge — ShellHacks X**
 
 Repro was built in 36 hours for a hackathon.
 
